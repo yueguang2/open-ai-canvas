@@ -25,7 +25,7 @@ async function api(method, path, body) {
 function videoCap() {
   return { version: 1, video: {
     references: { promptMaxChars: 8000, minImages: 0, maxImages: 2, maxImageBytes: 10485760, maxVideos: 0, maxVideoBytes: 0, maxVideoDurationSeconds: 0, maxAudios: 0, maxAudioBytes: 0, maxAudioDurationSeconds: 0 },
-    duration: { selection: 'range', min: 5, max: 15, step: 1, default: 5 }, durationSupported: true,
+    duration: { selection: 'range', min: 1, max: 30, step: 1, default: 12 }, durationSupported: true,
     ratios: RATIOS, defaultRatio: '16:9',
     resolutions: QUALITY_TIERS, defaultResolution: '1.5MP',
     generateAudio: { supported: false, default: false }, watermark: { supported: false, default: false },
@@ -34,7 +34,13 @@ function videoCap() {
 }
 function imageCap() {
   return { version: 1, image: {
-    parameters: [], references: { promptMaxChars: 8000, maxImages: 0, maxImageBytes: 0, maskSupported: false },
+    parameters: [
+      { name: 'size', label: '画幅', type: 'string', binding: 'aspectRatio', encoding: 'pixels', values: RATIOS, default: '16:9', pricing: true },
+      { name: 'imageResolution', label: '画质', type: 'string', binding: 'resolution', values: QUALITY_TIERS, default: '3.0MP', pricing: true },
+      { name: 'count', label: '生成数量', type: 'integer', binding: 'imageCount', min: 1, max: 1, step: 1, default: 1 },
+      { name: 'quality', label: '图片质量', type: 'string', binding: 'quality', enabled: false },
+    ],
+    references: { promptMaxChars: 8000, maxImages: 0, maxImageBytes: 0, maskSupported: false },
     size: { parameter: 'size', values: RATIOS, default: '16:9', allowCustom: false },
     resolution: { supported: true, values: QUALITY_TIERS, default: '3.0MP' },
     quality: { supported: false, values: [], default: '' },
