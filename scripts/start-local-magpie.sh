@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
-# 本地一键启动：Go 后端(SQLite) + 前端(生产预览) + 本机 Magpie 渠道配置
+# 本地一键启动：影策后端(SQLite) + 前端(生产预览) + 本机 Magpie 渠道 + 晨羽桥接(可选)
 #
-# 需要：Go 1.25+、Bun、本机 Magpie 已运行（默认 127.0.0.1:3425）。
+# 需要：Go 1.25+、Bun、本机 Magpie(默认 127.0.0.1:3425)。
+# 晨羽桥接：把 CHENYU_API_KEY 写进 .local/chenyu.env 即自动随启动（.local 已被 git 忽略）。
 # 用法：  scripts/start-local-magpie.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# 工具链（按需调整）
 export PATH="$HOME/.local/go/bin:$HOME/.bun/bin:$PATH"
 GO_BIN="${GO_BIN:-$HOME/.local/go/bin/go}"
 BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
 
 DATA_DIR="$ROOT/.local/project-workbench-debug"
 mkdir -p "$DATA_DIR" "$ROOT/.local/cache/go-build" "$ROOT/.local/cache/go-mod"
+
+# 本地密钥/配置（.local 被 git 忽略，不会进仓库）
+if [ -f "$ROOT/.local/chenyu.env" ]; then
+  set -a; . "$ROOT/.local/chenyu.env"; set +a
+fi
+
+PIDS=()
+cleanup() {
+  echo ""
+  echo "==> 结束进程..."
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+}
+trap cleanup EXIT INT TERM
 
 echo "==> 启动后端 (SQLite, 允许本机私网上游)"
 cd "$ROOT/backend"
@@ -26,7 +39,7 @@ CANVAS_ALLOW_PRIVATE_UPSTREAMS=true \
 CANVAS_ALLOWED_PRIVATE_UPSTREAM_HOSTS=127.0.0.1 \
 CANVAS_CORS_ORIGINS=http://localhost:3000 \
 "$GO_BIN" run ./cmd/server >"$ROOT/.local/backend.log" 2>&1 &
-BACKEND_PID=$!
+BACKEND_PID=$!; PIDS+=("$BACKEND_PID")
 echo "    backend pid=$BACKEND_PID  log=.local/backend.log"
 
 echo "==> 等待后端就绪"
@@ -36,16 +49,38 @@ for i in $(seq 1 60); do
 done
 
 echo "==> 配置本机 Magpie 渠道（首次会注册管理员 admin / Admin123456）"
-node "$ROOT/scripts/configure-local-magpie.mjs" || echo "    (配置脚本失败：确认本机 Magpie 在 127.0.0.1:3425 运行)"
+node "$ROOT/scripts/configure-local-magpie.mjs" || echo "    (Magpie 配置失败：确认本机 Magpie 在 127.0.0.1:3425 运行)"
+
+# ---- 晨羽桥接（有 Key 才启动）----
+BRIDGE_PORT="${BRIDGE_PORT:-3400}"
+if [ -n "${CHENYU_API_KEY:-}" ]; then
+  echo "==> 启动晨羽桥接 127.0.0.1:${BRIDGE_PORT}"
+  ( cd "$ROOT/chenyu-bridge" && exec env \
+      CHENYU_API_KEY="$CHENYU_API_KEY" \
+      BRIDGE_PORT="$BRIDGE_PORT" \
+      BRIDGE_DAILY_BUDGET_CNY="${BRIDGE_DAILY_BUDGET_CNY:-5}" \
+      BRIDGE_IDLE_MINUTES="${BRIDGE_IDLE_MINUTES:-10}" \
+      node server.mjs ) >"$ROOT/.local/chenyu-bridge.log" 2>&1 &
+  BRIDGE_PID=$!; PIDS+=("$BRIDGE_PID")
+  echo "    bridge pid=$BRIDGE_PID  log=.local/chenyu-bridge.log"
+  for i in $(seq 1 30); do
+    if curl -sf -o /dev/null "http://127.0.0.1:${BRIDGE_PORT}/healthz"; then break; fi
+    sleep 1
+  done
+  echo "==> 同步晨羽模型到影策（幂等）"
+  node "$ROOT/chenyu-bridge/configure-chenyu.mjs" || echo "    (晨羽渠道配置失败，可稍后重跑 chenyu-bridge/configure-chenyu.mjs)"
+else
+  echo "==> 未配置 CHENYU_API_KEY，跳过晨羽桥接（写 .local/chenyu.env 即可自动启用）"
+fi
 
 echo "==> 构建并启动前端"
 cd "$ROOT/web"
 if [ ! -d dist ]; then "$BUN_BIN" run build; fi
 "$BUN_BIN" run start >"$ROOT/.local/web.log" 2>&1 &
-WEB_PID=$!
+WEB_PID=$!; PIDS+=("$WEB_PID")
 echo "    web pid=$WEB_PID  log=.local/web.log"
 
 echo ""
 echo "✅ 打开 http://localhost:3000  用 admin / Admin123456 登录"
-echo "   Ctrl+C 结束前端；后端仍在后台（kill $BACKEND_PID 结束）"
+echo "   Ctrl+C 结束全部（后端/前端/桥接）"
 wait "$WEB_PID"

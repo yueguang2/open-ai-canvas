@@ -79,3 +79,15 @@ CHENYU_API_KEY=sk-xxx node devices.mjs pod 关键词     # 按关键词搜应用
 
 - **MOSS 文生图**：RTX 4080(16GB) 可用。
 - **H3 视频**：4080(16GB) 会 OOM（ComfyUI 进程崩溃）→ 请用 **nGPU-48GB / RTX 5090(≥32GB)**；nGPU-48GB 实测出片正常（5s、24fps、带音频）。
+
+## 随影策一起启动（一键）
+
+把 Key 写到被 git 忽略的 `.local/chenyu.env`：
+
+```
+CHENYU_API_KEY=sk-xxx
+BRIDGE_DAILY_BUDGET_CNY=5
+BRIDGE_IDLE_MINUTES=10
+```
+
+然后直接 `scripts/start-local-magpie.sh` 一条命令就会一起启动：影策后端 + 前端 + 晨羽桥接（并自动把模型同步进影策）；`Ctrl+C` 一起退出。没配 Key 时会自动跳过桥接。
