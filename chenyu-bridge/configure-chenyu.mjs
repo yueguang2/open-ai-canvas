@@ -24,7 +24,7 @@ async function api(method, path, body) {
 
 function videoCap() {
   return { version: 1, video: {
-    references: { promptMaxChars: 8000, minImages: 0, maxImages: 3, maxImageBytes: 10485760, maxVideos: 0, maxVideoBytes: 0, maxVideoDurationSeconds: 0, maxAudios: 0, maxAudioBytes: 0, maxAudioDurationSeconds: 0 },
+    references: { promptMaxChars: 8000, minImages: 0, maxImages: 9, maxImageBytes: 10485760, maxVideos: 3, maxVideoBytes: 52428800, maxVideoDurationSeconds: 0, maxAudios: 3, maxAudioBytes: 20971520, maxAudioDurationSeconds: 0 },
     duration: { selection: 'range', min: 1, max: 30, step: 1, default: 12 }, durationSupported: true,
     ratios: RATIOS, defaultRatio: '16:9',
     resolutions: QUALITY_TIERS, defaultResolution: '1.5MP',

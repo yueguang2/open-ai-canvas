@@ -72,5 +72,5 @@ CHENYU_API_KEY=sk-xxx node devices.mjs pod 关键词     # 按关键词搜应用
 
 ## 行为约定
 
-- **参考图**：按工作流上限 3 张，顺序映射到 `ref_image_0/1/2`（节点 51/49/50）；该工作流为参考图生视频，无首帧/尾帧模式。
+- **参考素材**：模型节点为 autogrow，支持 **最多 9 图 / 3 视频 / 3 音频**。桥接在提交时按用户实际提供的数量**动态**生成 LoadImage/VHS_LoadVideo/LoadAudio 节点并接到 `ref_images/ref_videos/ref_audios` 槽位（无需预改工作流）；无首帧/尾帧模式。
 - **并发**：全局串行排队，同一时间只跑一个生成任务；同一 GPU 只保留一台实例（平时关机）。

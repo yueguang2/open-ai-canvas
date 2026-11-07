@@ -141,3 +141,37 @@ test('超出每日预算时拦截（不创建实例）', async () => {
     config.dailyBudgetCny = 0;
   }
 });
+
+test('fillWorkflow 提交时动态接 9图/3视频/3音频 槽位', () => {
+  const wf = JSON.parse(fs.readFileSync(path.join(config.workflowsDir, 'YZ金鱼-MiniMax_H3_终极篇-文武双全v2.api.json'), 'utf8'));
+  const images = ['i0.png', 'i1.png', 'i2.png', 'i3.png', 'i4.png'];
+  const videos = ['v0.mp4', 'v1.mp4'];
+  const audios = ['a0.wav'];
+  const out = fillWorkflow(wf, config.presets.h3.mapping, { prompt: 'x' }, { images, videos, audios });
+  for (let i = 0; i < 5; i++) {
+    const link = out['265'].inputs['ref_images.ref_image_' + i];
+    assert.ok(link, 'img slot ' + i);
+    assert.equal(out[link[0]].inputs.image, images[i]);
+  }
+  assert.equal(out['265'].inputs['ref_images.ref_image_5'], undefined);
+  for (let i = 0; i < 2; i++) {
+    const link = out['265'].inputs['ref_videos.ref_video_' + i];
+    assert.ok(link, 'vid slot ' + i);
+    assert.equal(out[link[0]].class_type, 'VHS_LoadVideo');
+    assert.equal(out[link[0]].inputs.video, videos[i]);
+  }
+  const al = out['265'].inputs['ref_audios.ref_audio_0'];
+  assert.ok(al, 'audio slot 0');
+  assert.equal(out[al[0]].class_type, 'LoadAudio');
+  assert.equal(out[al[0]].inputs.audio, audios[0]);
+});
+
+test('fillWorkflow 少于3张图时移除未用默认图节点', () => {
+  const wf = JSON.parse(fs.readFileSync(path.join(config.workflowsDir, 'YZ金鱼-MiniMax_H3_终极篇-文武双全v2.api.json'), 'utf8'));
+  const out = fillWorkflow(wf, config.presets.h3.mapping, { prompt: 'x' }, { images: ['only.png'] });
+  assert.equal(out['265'].inputs['ref_images.ref_image_0'][0], '51');
+  assert.equal(out['51'].inputs.image, 'only.png');
+  assert.equal(out['265'].inputs['ref_images.ref_image_1'], undefined);
+  assert.equal(out['49'], undefined);
+  assert.equal(out['50'], undefined);
+});

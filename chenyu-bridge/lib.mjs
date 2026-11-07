@@ -202,7 +202,66 @@ function parseMegapixels(v) {
   return isFinite(n2) && n2 > 0 ? n2 : null;
 }
 
-export function fillWorkflow(wf, mapping, params, imageNames = []) {
+function nextNodeId(g) {
+  let m = 0;
+  for (const k of Object.keys(g)) if (/^\d+$/.test(k)) m = Math.max(m, Number(k));
+  let id = m + 1;
+  while (g[String(id)]) id++;
+  return String(id);
+}
+function isNodeReferenced(g, id) {
+  for (const k of Object.keys(g)) {
+    const inp = g[k].inputs || {};
+    for (const v of Object.values(inp)) if (Array.isArray(v) && v[0] === id) return true;
+  }
+  return false;
+}
+// 提交时按用户提供的图/视频/音频数量，动态接 ref_images/ref_videos/ref_audios 槽位
+function applyMediaSlots(g, mapping, media) {
+  const refNode = mapping.refNode;
+  if (!refNode || !g[refNode]) return;
+  const imgs = media.images || [], vids = media.videos || [], auds = media.audios || [];
+  const inp = g[refNode].inputs;
+  const baseImg = mapping.imageSlots || [];
+  const maxImg = mapping.maxImages || baseImg.length;
+  const maxVid = mapping.maxVideos || 3;
+  const maxAud = mapping.maxAudios || 3;
+
+  // 图片
+  for (const k of Object.keys(inp)) if (k.startsWith('ref_images.ref_image_')) delete inp[k];
+  const imgCount = Math.min(imgs.length, maxImg);
+  for (let i = 0; i < imgCount; i++) {
+    let nid;
+    if (i < baseImg.length) nid = baseImg[i];
+    else { nid = nextNodeId(g); g[nid] = { class_type: 'LoadImage', inputs: { image: '' } }; }
+    g[nid].inputs.image = imgs[i];
+    inp['ref_images.ref_image_' + i] = [nid, 0];
+  }
+  for (let i = imgCount; i < baseImg.length; i++) {
+    const nid = baseImg[i];
+    if (g[nid] && !isNodeReferenced(g, nid)) delete g[nid];
+  }
+
+  // 视频
+  for (const k of Object.keys(inp)) if (k.startsWith('ref_videos.ref_video_')) delete inp[k];
+  const vidCount = Math.min(vids.length, maxVid);
+  for (let i = 0; i < vidCount; i++) {
+    const nid = nextNodeId(g);
+    g[nid] = { class_type: 'VHS_LoadVideo', inputs: { video: vids[i], force_rate: 0, custom_width: 0, custom_height: 0, frame_load_cap: 0, skip_first_frames: 0, select_every_nth: 1 } };
+    inp['ref_videos.ref_video_' + i] = [nid, 0];
+  }
+
+  // 音频
+  for (const k of Object.keys(inp)) if (k.startsWith('ref_audios.ref_audio_')) delete inp[k];
+  const audCount = Math.min(auds.length, maxAud);
+  for (let i = 0; i < audCount; i++) {
+    const nid = nextNodeId(g);
+    g[nid] = { class_type: 'LoadAudio', inputs: { audio: auds[i] } };
+    inp['ref_audios.ref_audio_' + i] = [nid, 0];
+  }
+}
+
+export function fillWorkflow(wf, mapping, params, media = {}) {
   const g = structuredClone(wf);
   if (mapping.prompt && params.prompt != null) setIn(g, mapping.prompt.node, mapping.prompt.input, String(params.prompt));
   if (mapping.duration && params.duration != null) {
@@ -217,11 +276,8 @@ export function fillWorkflow(wf, mapping, params, imageNames = []) {
     if (!(mp > 0)) mp = mapping.megapixels.default;
     if (mp > 0) setIn(g, mapping.megapixels.node, mapping.megapixels.input, mp);
   }
-  const slots = mapping.imageSlots || [];
-  for (let i = 0; i < slots.length; i++) {
-    const name = imageNames[i];
-    if (name) setIn(g, slots[i], 'image', name);
-  }
+  const m = Array.isArray(media) ? { images: media } : (media || {});
+  applyMediaSlots(g, mapping, m);
   return g;
 }
 
@@ -309,18 +365,27 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
       const base = comfyBase(info);
       onStage('等待 ComfyUI 就绪');
       await comfyWaitReady(base);
-      const imageNames = [];
-      const slotCount = (preset.mapping.imageSlots || []).length;
-      let slotIdx = 0;
+      // 按类型分拣参考素材（image/video/audio），各自上传
+      const media = { images: [], videos: [], audios: [] };
+      const mp = preset.mapping || {};
+      const limitImg = mp.maxImages || (mp.imageSlots || []).length || 0;
+      const limitVid = mp.maxVideos || 0;
+      const limitAud = mp.maxAudios || 0;
+      let idx = 0;
       for (const m of params.media || []) {
-        if (slotIdx >= slotCount) break; // 按工作流上限，多余参考图忽略
+        const t = String(m.type || '').toLowerCase();
+        const kind = t.includes('video') ? 'video' : (t.includes('audio') || t.includes('voice')) ? 'audio' : 'image';
+        if (kind === 'image' && media.images.length >= limitImg) continue;
+        if (kind === 'video' && media.videos.length >= limitVid) continue;
+        if (kind === 'audio' && media.audios.length >= limitAud) continue;
         const buf = await fetchMediaBytes(m.url);
         if (!buf) continue;
-        const up = await comfyUpload(base, buf, 'ref-' + taskId + '-' + slotIdx + '.png', m.mime || 'image/png');
-        imageNames[slotIdx] = up.subfolder ? up.subfolder + '/' + up.name : up.name;
-        slotIdx++;
+        const ext = kind === 'video' ? '.mp4' : kind === 'audio' ? '.wav' : '.png';
+        const up = await comfyUpload(base, buf, 'ref-' + taskId + '-' + (idx++) + ext, m.mime || (kind === 'image' ? 'image/png' : 'application/octet-stream'));
+        const fname = up.subfolder ? up.subfolder + '/' + up.name : up.name;
+        (kind === 'video' ? media.videos : kind === 'audio' ? media.audios : media.images).push(fname);
       }
-      const wf = fillWorkflow(loadWorkflow(preset.workflowFile), preset.mapping, params, imageNames);
+      const wf = fillWorkflow(loadWorkflow(preset.workflowFile), preset.mapping, params, media);
       onStage('生成中');
       const promptId = await comfyQueue(base, wf);
       const hist = await comfyWaitHistory(base, promptId);

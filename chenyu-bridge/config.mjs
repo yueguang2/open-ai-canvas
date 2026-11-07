@@ -56,12 +56,15 @@ export const config = {
       outputKind: 'video',
       mapping: {
         prompt: { node: '263', input: 'text' },
-        duration: { node: '259', input: 'value', min: 5, max: 15 },
+        duration: { node: '259', input: 'value', min: 1, max: 30 },
         seed: { node: '397', input: 'seed' },
         aspect: { node: '252', input: 'aspect_ratio' },
         megapixels: { node: '252', input: 'megapixels', default: 1.5 },
-        // 参考图按顺序映射到工作流 ref_image_0/1/2（节点 51/49/50），上限 3 张
-        imageSlots: ['51', '49', '50'],
+        refNode: '265', // MiniMaxH3ReferenceToVideo：提交时动态接 ref_images/ref_videos/ref_audios
+        imageSlots: ['51', '49', '50'], // 前 3 张图复用工作流内置 LoadImage 节点
+        maxImages: 9,
+        maxVideos: 3,
+        maxAudios: 3,
       },
     },
     moss: {
