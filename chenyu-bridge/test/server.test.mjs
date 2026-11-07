@@ -70,3 +70,18 @@ test('POST /v1/images/generations → 返回 data[].url', async () => {
     assert.ok(j.data && j.data[0] && j.data[0].url, JSON.stringify(j));
   } finally { bridge.close(); up.server.close(); }
 });
+
+test('状态面板：GET / 返回 HTML，overview 返回余额', async () => {
+  const up = await startUpstream();
+  config.apiBase = up.base; config.apiKey = 'test'; config.minBalance = 0; config.idleMinutes = 999;
+  config.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cy-srv-dash-'));
+  const bridge = createBridgeServer();
+  const port = await listen(bridge);
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    assert.ok(html.includes('晨羽 Bridge 状态'), 'dashboard html');
+    const ov = await (await fetch(`http://127.0.0.1:${port}/api/bridge/overview`)).json();
+    assert.equal(ov.account.balance, 10);
+    assert.ok(Array.isArray(ov.models) && ov.models.includes('h3@4080'));
+  } finally { bridge.close(); up.server.close(); }
+});

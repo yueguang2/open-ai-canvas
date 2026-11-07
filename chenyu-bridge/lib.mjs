@@ -289,3 +289,22 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
     }
   });
 }
+
+// ---------------- 状态面板数据 ----------------
+export async function bridgeInstances() {
+  const out = [];
+  for (const [key, id] of Object.entries(state)) {
+    if (key === 'budget') continue;
+    const item = { key, instanceId: id, status: null, gpuName: '', title: '' };
+    try { const info = await chenyu.info(id); item.status = info.status; item.gpuName = info.gpu_name || ''; item.title = info.title || ''; }
+    catch (e) { item.status = 'error'; item.error = String((e && e.message) || e); }
+    out.push(item);
+  }
+  return out;
+}
+export async function bridgeAccount() {
+  let bal = null;
+  try { bal = await chenyu.balanceInfo(); } catch (e) {}
+  const spent = Number((state.budget && state.budget[todayKey()]) || 0);
+  return { balance: bal ? bal.balance : null, card: bal ? bal.card_balance : null, spendToday: spent, dailyBudgetCny: config.dailyBudgetCny };
+}

@@ -65,3 +65,7 @@ CHENYU_API_KEY=sk-xxx node devices.mjs gpu          # 列出 GPU 型号 + 时价
 CHENYU_API_KEY=sk-xxx node devices.mjs pod 关键词     # 按关键词搜应用市场 Pod（uuid/版本）
 ```
 把选中的 `gpu_uuid` 填进 `GPU_ALIASES`，`pod.uuid/tag` 填进 `config.presets`，`workflowFile` 放该 Pod 的 ComfyUI API 格式工作流即可扩展新模型。
+
+## 状态面板（纯 UI，不需要 GPU）
+
+浏览器打开 http://127.0.0.1:3400/ ：显示现金/算力卡余额、今日花费/预算、实例开机/运行/关机状态、可用模型（preset@gpu）、最近任务阶段与产物链接，每 3 秒自动刷新。数据接口：`GET /api/bridge/overview`、`GET /api/bridge/tasks`。
