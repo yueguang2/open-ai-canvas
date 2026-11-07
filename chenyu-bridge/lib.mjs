@@ -34,6 +34,7 @@ export const chenyu = {
 
 // ---------------- 实例编排 ----------------
 const STOPPED = new Set([0, 4, 22, 23]);
+const STOPPING = new Set([3, 21]); // 关机中：需先等到已关机再开机
 const STARTING = new Set([1, 24, 27]);
 const statusOf = (info) => (info ? Number(info.status) : -1);
 
@@ -98,6 +99,16 @@ function recordSpend(pricePerHour, elapsedMs) {
   saveState();
 }
 
+async function waitUntilStopped(id, timeoutMs = 180000) {
+  const t = Date.now();
+  while (Date.now() - t < timeoutMs) {
+    const info = await chenyu.info(id);
+    if (STOPPED.has(statusOf(info))) return info;
+    await sleep(4000);
+  }
+  throw new Error('等待实例关机超时');
+}
+
 async function instanceFor(presetKey, gpuAlias) {
   const preset = config.presets[presetKey];
   const gpuUuid = GPU_ALIASES[gpuAlias] || GPU_ALIASES[preset.defaultGpu];
@@ -105,13 +116,16 @@ async function instanceFor(presetKey, gpuAlias) {
   const key = preset.pod.uuid + '@' + gpuUuid;
   let id = state[key];
   if (id) {
-    const info = await chenyu.info(id).catch(() => null);
-    if (info) {
-      if (statusOf(info) === 2) return { id, info };
-      await ensureBalance();
-      if (STOPPED.has(statusOf(info)) || statusOf(info) === 0) await chenyu.startup(id);
-      return { id, info: await pollInstance(id) };
-    }
+    let info;
+    try { info = await chenyu.info(id); }
+    catch (e) { throw new Error('查询已有实例状态失败（为避免重复创建多花钱，本轮不新建）：' + ((e && e.message) || e)); }
+    const st = statusOf(info);
+    if (st === 2) return { id, info };
+    await ensureBalance();
+    if (STOPPING.has(st)) { await waitUntilStopped(id); await chenyu.startup(id); }
+    else if (STOPPED.has(st)) { await chenyu.startup(id); }
+    // 开机中/重启中：直接轮询到运行
+    return { id, info: await pollInstance(id) };
   }
   await ensureBalance();
   const created = await chenyu.createByPod(preset.pod.uuid, preset.pod.tag, gpuUuid, 1);
@@ -242,6 +256,31 @@ function withLock(key, fn) { const prev = chains.get(key) || Promise.resolve(); 
 const idleTimers = new Map();
 function cancelIdle(key) { const t = idleTimers.get(key); if (t) { clearTimeout(t); idleTimers.delete(key); } }
 function scheduleIdle(key) { cancelIdle(key); const t = setTimeout(async () => { idleTimers.delete(key); try { const id = state[key]; if (id) await chenyu.shutdown(id); } catch {} }, config.idleMinutes * 60000); if (t.unref) t.unref(); idleTimers.set(key, t); }
+
+// 进程重启后：对已知且仍在运行的实例重新挂上空闲关机，避免“孤儿实例”一直烧 GPU。
+export async function armIdleForKnownInstances() {
+  for (const key of Object.keys(state)) {
+    if (key === 'budget') continue;
+    const id = state[key];
+    if (!id) continue;
+    try { const info = await chenyu.info(id); if (statusOf(info) === 2) scheduleIdle(key); } catch {}
+  }
+}
+
+// 清理超过 maxAgeDays 天的生成产物，避免磁盘无限增长。
+export function pruneOldFiles(maxAgeDays = 7) {
+  try {
+    const dir = path.join(config.dataDir, 'files');
+    if (!fs.existsSync(dir)) return 0;
+    const cutoff = Date.now() - maxAgeDays * 86400000;
+    let n = 0;
+    for (const f of fs.readdirSync(dir)) {
+      const fp = path.join(dir, f);
+      try { if (fs.statSync(fp).mtimeMs < cutoff) { fs.unlinkSync(fp); n++; } } catch {}
+    }
+    return n;
+  } catch { return 0; }
+}
 
 export function parseModel(model) {
   const s = String(model || '').trim();

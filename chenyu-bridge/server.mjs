@@ -9,7 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { config } from './config.mjs';
-import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount } from './lib.mjs';
+import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles } from './lib.mjs';
 
 const PUBLIC_BASE = (process.env.BRIDGE_PUBLIC_BASE || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
 const tasks = new Map(); // id -> { id, status, url, message, kind, createdAt }
@@ -128,5 +128,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   server.listen(config.port, '127.0.0.1', () => {
     console.log(`chenyu-bridge listening on 127.0.0.1:${config.port}  public=${PUBLIC_BASE}`);
     if (!config.apiKey) console.warn('⚠️  CHENYU_API_KEY 未设置，向晨羽的请求会失败');
+    try { const n = pruneOldFiles(7); if (n) console.log(`已清理过期产物 ${n} 个`); } catch {}
+    armIdleForKnownInstances().catch(() => {});
   });
 }
