@@ -179,6 +179,14 @@ function setIn(wf, node, input, val) {
   wf[node].inputs[input] = val;
 }
 function clampDuration(v, min, max) { const n = Number(v); if (!isFinite(n) || n <= 0) return null; return Math.min(max, Math.max(min, Math.round(n))); }
+function parseMegapixels(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  const m = /^([0-9.]+)\s*mp$/i.exec(s);
+  if (m) { const n = Number(m[1]); return isFinite(n) && n > 0 ? n : null; }
+  const n2 = Number(s);
+  return isFinite(n2) && n2 > 0 ? n2 : null;
+}
 
 export function fillWorkflow(wf, mapping, params, imageNames = {}) {
   const g = structuredClone(wf);
@@ -190,8 +198,10 @@ export function fillWorkflow(wf, mapping, params, imageNames = {}) {
   if (mapping.seed && params.seed != null) setIn(g, mapping.seed.node, mapping.seed.input, Number(params.seed));
   if (mapping.aspect && params.ratio) setIn(g, mapping.aspect.node, mapping.aspect.input, ASPECT_LABELS[params.ratio] || params.ratio);
   if (mapping.megapixels) {
-    const mp = params.megapixels != null ? Number(params.megapixels) : mapping.megapixels.default;
-    if (mp) setIn(g, mapping.megapixels.node, mapping.megapixels.input, mp);
+    let mp = params.megapixels != null ? Number(params.megapixels) : null;
+    if (!(mp > 0)) mp = parseMegapixels(params.resolution);
+    if (!(mp > 0)) mp = mapping.megapixels.default;
+    if (mp > 0) setIn(g, mapping.megapixels.node, mapping.megapixels.input, mp);
   }
   for (const slot of mapping.imageSlots || []) {
     const name = imageNames[slot.role];

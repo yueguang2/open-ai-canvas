@@ -6,12 +6,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // GPU 型号别名 -> 晨羽 gpu_uuid（来自 /gpu/list）
 export const GPU_ALIASES = {
+  '3090': 'beb8543586395d447a68d29e9603e847',
   '4080': 'c873233d835647ea8d985f370792a85a',
   '4090d': '32ceabe6c96e44bdb1e4d80358a3b8ae',
   '5090': 'a7f3d92e4c5b4a7e9b8c6f1e2d3a4b5c',
   ngpu48: 'd92a57488465f63af5eaab49b403952f',
   ngpu32: 'd4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9',
+  '6000d': '6e7f8a9d2b4c01573890acebdf2467519',
 };
+
+// 画质 = ResolutionSelector 的 megapixels 档位（与工作流一致）
+export const QUALITY_TIERS = ['1.0MP', '1.5MP', '2.0MP', '3.0MP', '4.0MP'];
 
 // ResolutionSelector 合法档位
 export const ASPECT_LABELS = {

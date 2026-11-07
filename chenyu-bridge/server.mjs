@@ -76,6 +76,7 @@ async function handle(req, res) {
       media: inp.media || [],
       ratio: prm.ratio,
       duration: prm.duration,
+      resolution: prm.resolution,
       megapixels: prm.megapixels,
     };
     const id = newId();
@@ -91,7 +92,7 @@ async function handle(req, res) {
     const preset = config.presets[presetKey];
     if (!preset) return send(res, 400, { error: { message: '未知模型 ' + body.model } });
     const ratio = /^[0-9]+:[0-9]+$/.test(String(body.size || '')) ? body.size : (body.aspect_ratio || '16:9');
-    const params = { prompt: body.prompt, ratio, megapixels: body.megapixels };
+    const params = { prompt: body.prompt, ratio, megapixels: body.megapixels, resolution: body.resolution };
     const id = newId();
     try {
       const r = await runTask(presetKey, gpuAlias, params, id);
