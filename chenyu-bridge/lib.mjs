@@ -202,7 +202,7 @@ function parseMegapixels(v) {
   return isFinite(n2) && n2 > 0 ? n2 : null;
 }
 
-export function fillWorkflow(wf, mapping, params, imageNames = {}) {
+export function fillWorkflow(wf, mapping, params, imageNames = []) {
   const g = structuredClone(wf);
   if (mapping.prompt && params.prompt != null) setIn(g, mapping.prompt.node, mapping.prompt.input, String(params.prompt));
   if (mapping.duration && params.duration != null) {
@@ -217,9 +217,10 @@ export function fillWorkflow(wf, mapping, params, imageNames = {}) {
     if (!(mp > 0)) mp = mapping.megapixels.default;
     if (mp > 0) setIn(g, mapping.megapixels.node, mapping.megapixels.input, mp);
   }
-  for (const slot of mapping.imageSlots || []) {
-    const name = imageNames[slot.role];
-    if (name) setIn(g, slot.node, 'image', name);
+  const slots = mapping.imageSlots || [];
+  for (let i = 0; i < slots.length; i++) {
+    const name = imageNames[i];
+    if (name) setIn(g, slots[i], 'image', name);
   }
   return g;
 }
@@ -295,7 +296,8 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
   if (!preset) throw new Error('未知 preset: ' + presetKey);
   const gpuUuid = GPU_ALIASES[gpuAlias] || GPU_ALIASES[preset.defaultGpu];
   const key = preset.pod.uuid + '@' + gpuUuid;
-  return withLock(key, async () => {
+  // 全局串行：并发时排队，同一时间只跑一个生成（省钱）
+  return withLock('__global__', async () => {
     cancelIdle(key);
     const startedAt = Date.now();
     let pricePerHour = config.priceFallbackCny;
@@ -307,16 +309,16 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
       const base = comfyBase(info);
       onStage('等待 ComfyUI 就绪');
       await comfyWaitReady(base);
-      const imageNames = {};
+      const imageNames = [];
+      const slotCount = (preset.mapping.imageSlots || []).length;
+      let slotIdx = 0;
       for (const m of params.media || []) {
+        if (slotIdx >= slotCount) break; // 按工作流上限，多余参考图忽略
         const buf = await fetchMediaBytes(m.url);
         if (!buf) continue;
-        const up = await comfyUpload(base, buf, (m.type || 'image') + '-' + taskId + '.png', m.mime || 'image/png');
-        const fname = up.subfolder ? up.subfolder + '/' + up.name : up.name;
-        const role = m.type || 'reference_image';
-        const slot = (preset.mapping.imageSlots || []).find((s) => s.role === role && !imageNames[s.role]);
-        if (slot) imageNames[slot.role] = fname;
-        else if (!imageNames['reference_image']) imageNames['reference_image'] = fname;
+        const up = await comfyUpload(base, buf, 'ref-' + taskId + '-' + slotIdx + '.png', m.mime || 'image/png');
+        imageNames[slotIdx] = up.subfolder ? up.subfolder + '/' + up.name : up.name;
+        slotIdx++;
       }
       const wf = fillWorkflow(loadWorkflow(preset.workflowFile), preset.mapping, params, imageNames);
       onStage('生成中');

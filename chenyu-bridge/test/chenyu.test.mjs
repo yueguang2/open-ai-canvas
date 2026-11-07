@@ -52,13 +52,17 @@ async function startMock(opts = {}) {
   return { server, getBase: () => base, getPrompt: () => capturedPrompt, getCreateCalls: () => createCalls };
 }
 
-test('fillWorkflow 映射 prompt/时长/画幅', () => {
+test('fillWorkflow 映射 prompt/时长/画幅/参考图槽位', () => {
   const wf = JSON.parse(fs.readFileSync(path.join(config.workflowsDir, 'YZ金鱼-MiniMax_H3_终极篇-文武双全v2.api.json'), 'utf8'));
-  const out = fillWorkflow(wf, config.presets.h3.mapping, { prompt: '一只猫', duration: 8, ratio: '16:9', seed: 42 }, {});
+  const out = fillWorkflow(wf, config.presets.h3.mapping, { prompt: '一只猫', duration: 8, ratio: '16:9', seed: 42 }, ['a.png', 'b.png', 'c.png']);
   assert.equal(out['263'].inputs.text, '一只猫');
   assert.equal(out['259'].inputs.value, 8);
   assert.equal(out['252'].inputs.aspect_ratio, '16:9 (Widescreen)');
   assert.equal(out['397'].inputs.seed, 42);
+  // 参考图按顺序进 ref_image_0/1/2 (节点 51/49/50)
+  assert.equal(out['51'].inputs.image, 'a.png');
+  assert.equal(out['49'].inputs.image, 'b.png');
+  assert.equal(out['50'].inputs.image, 'c.png');
 });
 
 test('runTask 端到端（mock）', async () => {

@@ -60,10 +60,8 @@ export const config = {
         seed: { node: '397', input: 'seed' },
         aspect: { node: '252', input: 'aspect_ratio' },
         megapixels: { node: '252', input: 'megapixels', default: 1.5 },
-        imageSlots: [
-          { role: 'first_frame', node: '50' },
-          { role: 'reference_image', node: '49' },
-        ],
+        // 参考图按顺序映射到工作流 ref_image_0/1/2（节点 51/49/50），上限 3 张
+        imageSlots: ['51', '49', '50'],
       },
     },
     moss: {
