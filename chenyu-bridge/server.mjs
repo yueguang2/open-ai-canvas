@@ -7,6 +7,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { config } from './config.mjs';
 import { runTask, parseModel, chenyu } from './lib.mjs';
 
@@ -106,10 +107,16 @@ async function handle(req, res) {
   return send(res, 404, { error: 'not found', path: p });
 }
 
-const server = http.createServer((req, res) => {
-  handle(req, res).catch((e) => { try { send(res, 500, { error: { message: String(e && e.message || e) } }); } catch {} });
-});
-server.listen(config.port, '127.0.0.1', () => {
-  console.log(`chenyu-bridge listening on 127.0.0.1:${config.port}  public=${PUBLIC_BASE}`);
-  if (!config.apiKey) console.warn('⚠️  CHENYU_API_KEY 未设置，向晨羽的请求会失败');
-});
+export function createBridgeServer() {
+  return http.createServer((req, res) => {
+    handle(req, res).catch((e) => { try { send(res, 500, { error: { message: String(e && e.message || e) } }); } catch {} });
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const server = createBridgeServer();
+  server.listen(config.port, '127.0.0.1', () => {
+    console.log(`chenyu-bridge listening on 127.0.0.1:${config.port}  public=${PUBLIC_BASE}`);
+    if (!config.apiKey) console.warn('⚠️  CHENYU_API_KEY 未设置，向晨羽的请求会失败');
+  });
+}
