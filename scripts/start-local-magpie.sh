@@ -16,6 +16,13 @@ BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
 DATA_DIR="$ROOT/.local/project-workbench-debug"
 mkdir -p "$DATA_DIR" "$ROOT/.local/cache/go-build" "$ROOT/.local/cache/go-mod"
 
+# 内置 Agent 运行时依赖（缺了会导致“Agent执行失败”）
+PI_DIR="$ROOT/backend/agent-runtime/pi"
+if [ ! -d "$PI_DIR/node_modules" ]; then
+  echo "==> 安装 Agent 运行时依赖（首次，约 15s）"
+  ( cd "$PI_DIR" && npm install --no-audit --no-fund ) || echo "    (Agent 依赖安装失败，Agent 功能可能不可用)"
+fi
+
 # 本地密钥/配置（.local 被 git 忽略，不会进仓库）
 if [ -f "$ROOT/.local/chenyu.env" ]; then
   set -a; . "$ROOT/.local/chenyu.env"; set +a
