@@ -65,6 +65,39 @@ async function ensureBalance() {
   }
 }
 
+// ---------------- 预算保护 ----------------
+let gpuPriceCache = { at: 0, map: {} };
+async function gpuHourPrice(gpuUuid) {
+  const now = Date.now();
+  if (now - gpuPriceCache.at > 5 * 60000) {
+    try {
+      const d = await chenyu.gpuList();
+      const map = {};
+      for (const g of d.gpu_list || []) map[g.gpu_uuid] = Number((g.price && g.price.hour) || 0);
+      gpuPriceCache = { at: now, map };
+    } catch {}
+  }
+  const p = gpuPriceCache.map[gpuUuid];
+  return isFinite(p) && p > 0 ? p : config.priceFallbackCny;
+}
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+function ensureBudget(pricePerHour) {
+  if (!(config.dailyBudgetCny > 0)) return;
+  const spent = Number((state.budget && state.budget[todayKey()]) || 0);
+  const est = pricePerHour * (config.maxRunMinutes / 60);
+  if (spent + est > config.dailyBudgetCny) {
+    throw new Error(`今日预算不足：已花 ¥${spent.toFixed(3)}，本次预计 ≥¥${est.toFixed(3)}，上限 ¥${config.dailyBudgetCny}`);
+  }
+}
+function recordSpend(pricePerHour, elapsedMs) {
+  const amount = pricePerHour * (Math.max(0, elapsedMs) / 3600000);
+  if (!(amount > 0)) return;
+  if (!state.budget) state.budget = {};
+  const k = todayKey();
+  state.budget[k] = Number(state.budget[k] || 0) + amount;
+  saveState();
+}
+
 async function instanceFor(presetKey, gpuAlias) {
   const preset = config.presets[presetKey];
   const gpuUuid = GPU_ALIASES[gpuAlias] || GPU_ALIASES[preset.defaultGpu];
@@ -215,7 +248,11 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
   const key = preset.pod.uuid + '@' + gpuUuid;
   return withLock(key, async () => {
     cancelIdle(key);
+    const startedAt = Date.now();
+    let pricePerHour = config.priceFallbackCny;
     try {
+      pricePerHour = await gpuHourPrice(gpuUuid);
+      ensureBudget(pricePerHour);
       onStage('准备实例（未运行则开机）');
       const { info } = await instanceFor(presetKey, gpuAlias);
       const base = comfyBase(info);
@@ -248,6 +285,7 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
       return { file: fname, kind: preset.outputKind };
     } finally {
       scheduleIdle(key);
+      recordSpend(pricePerHour, Date.now() - startedAt);
     }
   });
 }

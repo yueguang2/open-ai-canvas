@@ -33,6 +33,12 @@ export const config = {
   idleMinutes: Number(process.env.BRIDGE_IDLE_MINUTES || 10),
   // 现金余额阈值：低于它就不开机（晨羽 Pod 开机服务费扣现金余额）
   minBalance: Number(process.env.BRIDGE_MIN_BALANCE || 0),
+  // 每日预算上限（元）；0 表示不限制。超限则拒绝新任务。
+  dailyBudgetCny: Number(process.env.BRIDGE_DAILY_BUDGET_CNY || 0),
+  // 估算单次任务最长运行分钟数（用于预算预估）
+  maxRunMinutes: Number(process.env.BRIDGE_MAX_RUN_MINUTES || 15),
+  // 取不到 GPU 价格时的兜底单价（元/小时）
+  priceFallbackCny: Number(process.env.BRIDGE_PRICE_FALLBACK_CNY || 2.18),
   dataDir: path.join(__dirname, 'data'),
   workflowsDir: path.join(__dirname, 'workflows'),
   presets: {

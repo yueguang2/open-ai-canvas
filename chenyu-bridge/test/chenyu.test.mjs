@@ -20,7 +20,7 @@ async function startMock(opts = {}) {
       res.writeHead(code, { 'content-type': raw ? 'application/octet-stream' : 'application/json' });
       res.end(raw || JSON.stringify(obj));
     };
-    if (p === '/gpu/list') return reply({ code: 0, data: { gpu_list: [], total: 0 } });
+    if (p === '/gpu/list') return reply({ code: 0, data: { gpu_list: [{ gpu_uuid: 'c873233d835647ea8d985f370792a85a', gpu_name: 'RTX 4080', price: { hour: 2.18 } }], total: 1 } });
     if (p === '/balance/info') return reply({ code: 0, data: { balance: opts.balance ?? 10, card_balance: 0 } });
     if (p === '/pod/list') return reply({ code: 0, data: { pod_list: [], total: 0 } });
     if (p === '/instance/create_by_pod') { createCalls += 1; return reply({ code: 0, data: { instance_uuid: 'inst1', status: 1 } }); }
@@ -116,5 +116,24 @@ test('runTask 图片(MOSS) 端到端（mock）', async () => {
     assert.equal(pr['88'].inputs.value, '一只猫');
   } finally {
     mock.server.close();
+  }
+});
+
+test('超出每日预算时拦截（不创建实例）', async () => {
+  const mock = await startMock();
+  config.apiBase = mock.getBase();
+  config.apiKey = 'test';
+  config.dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cy-bridge-budget-'));
+  config.minBalance = 0;
+  config.idleMinutes = 999;
+  config.dailyBudgetCny = 0.001;
+  config.maxRunMinutes = 15;
+  config.priceFallbackCny = 2.18;
+  try {
+    await assert.rejects(() => runTask('h3', 'ngpu48', { prompt: 'x', ratio: '16:9', duration: 5 }, 'task_budget'), /预算/);
+    assert.equal(mock.getCreateCalls(), 0, '预算不足不应创建实例');
+  } finally {
+    mock.server.close();
+    config.dailyBudgetCny = 0;
   }
 });
