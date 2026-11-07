@@ -35,6 +35,23 @@ export default defineConfig({
             },
         },
     },
+    preview: {
+        host: true,
+        port: 3000,
+        proxy: {
+            "/api": {
+                target: apiProxyTarget,
+                changeOrigin: true,
+                xfwd: true,
+                ws: true,
+            },
+            "/oauth/linuxdo/callback": {
+                target: apiProxyTarget,
+                changeOrigin: true,
+                xfwd: true,
+            },
+        },
+    },
     resolve: {
         alias: {
             "@": resolve(webDir, "src"),
