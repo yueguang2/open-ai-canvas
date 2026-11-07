@@ -57,3 +57,11 @@ cd chenyu-bridge && node --test   # 纯 mock，不需要 GPU
 ## 成本保护
 
 桥接开机前会查 `GET /balance/info`，现金余额 ≤ `BRIDGE_MIN_BALANCE` 时拒绝开机并报「余额不足」。
+
+## 选设备 / 选 Pod（管理端）
+
+```bash
+CHENYU_API_KEY=sk-xxx node devices.mjs gpu          # 列出 GPU 型号 + 时价 + gpu_uuid
+CHENYU_API_KEY=sk-xxx node devices.mjs pod 关键词     # 按关键词搜应用市场 Pod（uuid/版本）
+```
+把选中的 `gpu_uuid` 填进 `GPU_ALIASES`，`pod.uuid/tag` 填进 `config.presets`，`workflowFile` 放该 Pod 的 ComfyUI API 格式工作流即可扩展新模型。
