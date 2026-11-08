@@ -125,8 +125,9 @@ export function createBridgeServer() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const server = createBridgeServer();
-  server.listen(config.port, '127.0.0.1', () => {
-    console.log(`chenyu-bridge listening on 127.0.0.1:${config.port}  public=${PUBLIC_BASE}`);
+  const host = process.env.BRIDGE_HOST || '127.0.0.1';
+  server.listen(config.port, host, () => {
+    console.log(`chenyu-bridge listening on ${host}:${config.port}  public=${PUBLIC_BASE}`);
     if (!config.apiKey) console.warn('⚠️  CHENYU_API_KEY 未设置，向晨羽的请求会失败');
     try { const n = pruneOldFiles(7); if (n) console.log(`已清理过期产物 ${n} 个`); } catch {}
     armIdleForKnownInstances().catch(() => {});
