@@ -32,6 +32,7 @@ function persistTasksNow() {
 function persistTasks() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(persistTasksNow, 400);
+  broadcastTasks();
 }
 // 启动/建服时加载任务并做重启恢复（路径按当前 dataDir 解析，适配测试与迁移后的数据目录）
 function hydrateTasks() {
@@ -80,6 +81,19 @@ function submissionGuard(res) {
   return true;
 }
 
+// ---- SSE：任务状态实时推送（管理后台用）----
+const sseClients = new Set();
+let sseTimer = null;
+function tasksSnapshot() { return Array.from(tasks.values()).reverse(); }
+function broadcastTasks() {
+  if (!sseClients.size) return;
+  clearTimeout(sseTimer);
+  sseTimer = setTimeout(() => {
+    const payload = 'event: tasks\ndata: ' + JSON.stringify({ tasks: tasksSnapshot() }) + '\n\n';
+    for (const res of sseClients) { try { res.write(payload); } catch {} }
+  }, 150);
+}
+
 function adminAllowed(req, url) {
   const token = currentAdminToken();
   if (!token) return true;
@@ -116,15 +130,15 @@ function startTask(task, presetKey, gpuAlias, params) {
   task.status = 'running';
   task.updatedAt = Date.now();
   logEvent('info', `任务开始 ${task.id} ${task.kind || ''} ${task.model || presetKey + '@' + gpuAlias}`);
-  persistTasks();
-  runTask(presetKey, gpuAlias, params, task.id, (s) => { task.message = s; task.updatedAt = Date.now(); })
+  persistTasks(); broadcastTasks();
+  runTask(presetKey, gpuAlias, params, task.id, (s) => { task.message = s; task.updatedAt = Date.now(); broadcastTasks(); })
     .then((r) => {
-      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); return; }
-      task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); persistTasks();
+      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); broadcastTasks(); return; }
+      task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); persistTasks(); broadcastTasks();
     })
     .catch((e) => {
-      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); return; }
-      task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); persistTasks();
+      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); broadcastTasks(); return; }
+      task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); persistTasks(); broadcastTasks();
     });
 }
 
@@ -276,6 +290,15 @@ async function handle(req, res) {
     });
   }
   if (req.method === 'GET' && p === '/api/bridge/tasks') return send(res, 200, { tasks: Array.from(tasks.values()).reverse() });
+  if (req.method === 'GET' && p === '/api/bridge/events') {
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'connection': 'keep-alive', 'x-accel-buffering': 'no' });
+    res.write('retry: 3000\n\n');
+    res.write('event: tasks\ndata: ' + JSON.stringify({ tasks: tasksSnapshot() }) + '\n\n');
+    sseClients.add(res);
+    const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20000);
+    req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
+    return;
+  }
   if (req.method === 'GET' && p === '/api/bridge/gpus') { try { return send(res, 200, (await chenyu.gpuList()) || {}); } catch (e) { return send(res, 502, { error: String((e && e.message) || e), gpu_list: [] }); } }
   if (req.method === 'GET' && p === '/api/bridge/logs') return send(res, 200, { logs: recentLogs(u.searchParams.get('limit') || 300) });
   if (req.method === 'POST' && p === '/api/bridge/logs/clear') { clearLogs(); return send(res, 200, { ok: true }); }

@@ -185,7 +185,7 @@ function emptyIc(){return '<div><svg viewBox="0 0 24 24" width="34" height="34" 
 
 let TOKEN=localStorage.getItem('bridge_admin_token')||'';
 function needAuth(){$('authMask').classList.add('show');setTimeout(()=>$('tokenInput').focus(),60);}
-function saveToken(){TOKEN=$('tokenInput').value.trim();localStorage.setItem('bridge_admin_token',TOKEN);$('authMask').classList.remove('show');refresh();}
+function saveToken(){TOKEN=$('tokenInput').value.trim();localStorage.setItem('bridge_admin_token',TOKEN);$('authMask').classList.remove('show');refresh();if(window.connectSSE)connectSSE();}
 async function api(path,opts){opts=opts||{};const h=Object.assign({},opts.headers||{});if(TOKEN)h['x-admin-token']=TOKEN;if(opts.body)h['content-type']='application/json';
   const r=await fetch(path,Object.assign({},opts,{headers:h}));if(r.status===401){needAuth();throw new Error('需要管理口令');}
   if(!r.ok){const t=await r.text();throw new Error(t.slice(0,180));}return r.json();}
@@ -572,7 +572,10 @@ function applyTheme(t){document.documentElement.dataset.theme=t;localStorage.set
 $('btnTheme').onclick=()=>{const cur=document.documentElement.dataset.theme==='light'?'dark':'light';applyTheme(cur);};
 let timer=null;function startAuto(){if(timer)clearInterval(timer);timer=null;if($('auto').checked)timer=setInterval(()=>refresh(),5000);}
 applyTheme(localStorage.getItem('bridge_theme')||'dark');
-buildNav();setActive();route();refresh();startAuto();
+let es=null;
+function connectSSE(){ if(!window.EventSource)return; try{ if(es)es.close(); }catch(e){} const url='/api/bridge/events'+(TOKEN?('?token='+encodeURIComponent(TOKEN)):''); try{ es=new EventSource(url); es.addEventListener('tasks',ev=>{ try{ const d=JSON.parse(ev.data); S.tasks=d.tasks||[]; if(S.view==='tasks'||S.view==='overview')render(); }catch(e){} }); }catch(e){} }
+window.connectSSE=connectSSE;
+buildNav();setActive();route();refresh();startAuto();connectSSE();
 </script>
 </body>
 </html>
