@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { config, GPU_ALIASES } from './config.mjs';
-import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles, budgetHistory, workflowExists } from './lib.mjs';
+import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles, budgetHistory, workflowExists, warmInstance } from './lib.mjs';
 import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken, logFileInfo, readLogFile } from './runtime.mjs';
 import { loadPresets, listWorkflows, getWorkflow, upsertWorkflow, deleteWorkflow, saveWorkflowFile, readWorkflowFile, presetsMeta } from './presets.mjs';
 import { analyzeWorkflow } from './workflow-analyzer.mjs';
@@ -151,7 +151,24 @@ async function handle(req, res) {
   if (p.startsWith('/api/bridge/') && !adminAllowed(req, u)) return send(res, 401, { error: 'unauthorized' });
 
   // ------- 影策对接接口 -------
-  if (req.method === 'GET' && p === '/healthz') return send(res, 200, { ok: true, presets: Object.keys(config.presets) });
+  if (req.method === 'GET' && p === '/healthz') return send(res, 200, { ok: true, presets: Object.keys(config.presets), version: PKG.version, apiKeyConfigured: !!config.apiKey });
+  if (req.method === 'GET' && p === '/healthz/ready') {
+    const out = { ok: true, version: PKG.version, checks: { apiKey: !!config.apiKey, upstream: false, balance: null, card: null } };
+    if (!config.apiKey) { out.ok = false; out.checks.error = '未配置晨羽 API Key'; return send(res, 503, out); }
+    try {
+      const b = await Promise.race([
+        chenyu.balanceInfo(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('上游查询超时')), 5000)),
+      ]);
+      out.checks.upstream = true;
+      out.checks.balance = b ? b.balance : null;
+      out.checks.card = b ? b.card_balance : null;
+    } catch (e) {
+      out.ok = false; out.checks.error = '上游不可用：' + ((e && e.message) || e);
+      return send(res, 503, out);
+    }
+    return send(res, 200, out);
+  }
   if (req.method === 'GET' && p === '/v1/models') return send(res, 200, { object: 'list', data: modelList() });
 
   if (req.method === 'POST' && p === '/v1/videos') {
@@ -378,6 +395,22 @@ async function handle(req, res) {
     }
   }
 
+  if (req.method === 'POST' && p === '/api/bridge/prewarm') {
+    try {
+      const body = await jsonBody(req);
+      const model = String(body.model || '').trim();
+      if (!model) return send(res, 400, { ok: false, error: '缺少 model' });
+      const { presetKey, gpuAlias } = parseModel(model);
+      if (!config.presets[presetKey]) return send(res, 400, { ok: false, error: '未知模型 ' + model });
+      logEvent('info', `预热实例 ${model}`);
+      const r = await warmInstance(presetKey, gpuAlias);
+      logEvent('info', `预热完成 ${model} status=${r.status}`);
+      return send(res, 200, { ok: true, ...r });
+    } catch (e) {
+      logEvent('error', `预热失败：${(e && e.message) || e}`);
+      return send(res, 502, { ok: false, error: String((e && e.message) || e) });
+    }
+  }
   if (req.method === 'POST' && p === '/api/bridge/test') {
     const body = await jsonBody(req);
     const model = String(body.model || '').trim();

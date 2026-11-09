@@ -46,7 +46,8 @@ docker run -d --name chenyu-bridge \
 | `/v1/videos` | POST | 提交视频任务（异步），返回 `id` |
 | `/v1/videos/{id}` | GET | 查询视频任务，返回 `status` / `video_url` |
 | `/files/{name}` | GET | 获取产物文件 |
-| `/healthz` | GET | 健康检查 |
+| `/healthz` | GET | 存活检查（容器用，始终 200） |
+| `/healthz/ready` | GET | 就绪检查（校验 API Key 与晨羽余额；未就绪返回 503） |
 
 示例：
 ```bash
@@ -75,3 +76,4 @@ curl -s $BASE/v1/videos/$ID
 - **幂等去重**：视频/图片提交支持 `Idempotency-Key` 请求头（或 body 里 `idempotencyKey`）；同一请求在 15 分钟内重复提交会复用原任务/结果，避免超时重试导致重复开机计费。
 - **限流与队列上限**：默认每分钟最多 60 次提交、同时进行/排队任务最多 30 个，超限返回 429。可用环境变量 `BRIDGE_RATE_PER_MIN`、`BRIDGE_MAX_QUEUE` 调整。
 - **快速失败**：晨羽开机接口报错立即返回；开机中又回到关机、或 90 秒迟迟起不来，会尽快判定开机失败并把原因回给调用方。
+- **图片冷启动预热**：管理后台「任务 → 预热实例」可先开机，避免同步图片接口在冷启动时超时（预热后空闲会按策略关机）。

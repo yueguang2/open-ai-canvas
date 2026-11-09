@@ -468,3 +468,18 @@ export async function bridgeAccount() {
 
 // 每日花费历史（用于后台趋势图）。
 export function budgetHistory() { return Object.assign({}, state.budget || {}); }
+
+// 预热实例：把 Pod 开机并等到 ComfyUI 就绪，供随后的同步图片请求快速返回。
+// 预热后若没有任务，按空闲策略自动关机（armIdle）。
+export async function warmInstance(presetKey, gpuAlias) {
+  const preset = config.presets[presetKey];
+  if (!preset) throw new Error('未知预设: ' + presetKey);
+  const gpuUuid = GPU_ALIASES[gpuAlias] || GPU_ALIASES[preset.defaultGpu];
+  const key = preset.pod.uuid + '@' + gpuUuid;
+  return withLock('__global__', async () => {
+    await ensureBalance();
+    const { info } = await instanceFor(presetKey, gpuAlias);
+    scheduleIdle(key);
+    return { key, status: statusOf(info), gpuName: (info && info.gpu_name) || '' };
+  });
+}
