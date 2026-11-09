@@ -480,11 +480,25 @@ export async function bridgeInstances() {
   }
   return out;
 }
+let balanceCache = { at: 0, data: null };
 export async function bridgeAccount() {
+  const now = Date.now();
   let bal = null;
-  try { bal = await chenyu.balanceInfo(); } catch (e) {}
-  const spent = Number((state.budget && state.budget[todayKey()]) || 0);
-  return { balance: bal ? bal.balance : null, card: bal ? bal.card_balance : null, spendToday: spent, dailyBudgetCny: config.dailyBudgetCny };
+  if (balanceCache.data && now - balanceCache.at < 10000) bal = balanceCache.data;
+  else { try { bal = await chenyu.balanceInfo(); balanceCache = { at: now, data: bal }; } catch (e) {} }
+  const cash = bal && isFinite(Number(bal.balance)) ? Number(bal.balance) : null;
+  const card = bal && isFinite(Number(bal.card_balance)) ? Number(bal.card_balance) : null;
+  const spentTasks = Number((state.budget && state.budget[todayKey()]) || 0);
+  // 余额差校准：当天首次查询记录基线（现金+代金券），之后用差值估算真实消耗（含开机/空闲）
+  let spendByBalance = null, baseline = null;
+  if (cash != null && card != null) {
+    const total = cash + card;
+    const dk = todayKey();
+    if (!state.balanceBaseline || state.balanceBaseline.date !== dk) { state.balanceBaseline = { date: dk, total }; saveState(); }
+    baseline = state.balanceBaseline.total;
+    spendByBalance = Math.max(0, baseline - total);
+  }
+  return { balance: cash, card, spendToday: spentTasks, spendTodayByBalance: spendByBalance, balanceBaseline: baseline, dailyBudgetCny: config.dailyBudgetCny };
 }
 
 // 每日花费历史（用于后台趋势图）。

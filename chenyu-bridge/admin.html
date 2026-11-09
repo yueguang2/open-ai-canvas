@@ -228,7 +228,7 @@ function kpi(label,val,sub,ic){return '<div class="kpi"><div class="ic">'+iconF(
 
 function viewOverview(){
   const d=S.data,a=d.account||{},st=d.taskStats||{},bh=d.budgetHistory||{},sett=d.settings||{};
-  const budget=Number(a.dailyBudgetCny||sett.dailyBudgetCny||0),spent=Number(a.spendToday||0);
+  const budget=Number(a.dailyBudgetCny||sett.dailyBudgetCny||0),spentTasks=Number(a.spendToday||0),spentBal=(a.spendTodayByBalance!=null?Number(a.spendTodayByBalance):null),spent=(spentBal!=null?spentBal:spentTasks);
   const pct=budget>0?Math.min(100,Math.round(spent/budget*100)):0;
   const running=(d.instances||[]).filter(x=>x.status===2).length;
   const days=[];const now=new Date();
@@ -243,7 +243,7 @@ function viewOverview(){
   return banner+'<div class="kpis">'+
     kpi('现金余额',money(a.balance),'低于阈值将拒绝开机','gpus')+
     kpi('代金券',money(a.card),'card balance','gpus')+
-    kpi('今日花费',money(spent),'日预算 '+money(budget)+(sett.budgetEnabled===false?'（已关）':''),'tasks')+
+    kpi('今日花费',money(spent),'预算 '+money(budget)+(sett.budgetEnabled===false?'（已关）':'')+' · '+(spentBal!=null?'余额差':'任务估')+'（任务 '+money(spentTasks)+'）','tasks')+
     kpi('实例',(d.instances||[]).length+' <small style="font-size:13px;color:var(--muted)">个</small>',running?running+' 个运行中':'全部已关机','instances')+
   '</div>'+
   '<div class="grid2">'+
