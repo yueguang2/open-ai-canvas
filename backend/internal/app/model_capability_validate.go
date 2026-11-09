@@ -791,7 +791,18 @@ func imageSizePixelOutbound(profile *ImageCapabilityConfig, protocol string) boo
 	if profile.Parameters != nil {
 		for _, p := range profile.Parameters {
 			if p.Name == "size" && p.IsEnabled() {
-				return p.Encoding == "pixels"
+				if p.Encoding != "pixels" {
+					return false
+				}
+				// 防御：encoding 标成 pixels，但取值其实是比例（含 ":"）时，实际按比例出网。
+				// 旧画布节点会把 capabilityConfig 快照进节点，若此前被错误标成 pixels，
+				// 这里不能被误导去要求像素换算表。
+				for _, value := range p.Values {
+					if text, ok := value.(string); ok && strings.Contains(text, ":") {
+						return false
+					}
+				}
+				return true
 			}
 		}
 		return false

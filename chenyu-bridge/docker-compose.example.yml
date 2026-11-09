@@ -1,0 +1,20 @@
+# 只部署中间件（给别人用）的示例编排
+# 用法：docker compose -f docker-compose.example.yml up -d
+services:
+  chenyu-bridge:
+    image: ${BRIDGE_IMAGE:-chenyu-bridge:latest}
+    container_name: chenyu-bridge
+    ports:
+      - "${BRIDGE_PORT:-3400}:3400"
+    environment:
+      BRIDGE_HOST: 0.0.0.0
+      BRIDGE_PORT: "3400"
+      BRIDGE_PUBLIC_BASE: ${BRIDGE_PUBLIC_BASE:-}
+      # 公网部署建议设置；不设则后台开放
+      BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:-}
+      # 也可留空，启动后在后台「设置」里填写晨羽 API Key
+      CHENYU_API_KEY: ${CHENYU_API_KEY:-}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

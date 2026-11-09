@@ -8,8 +8,10 @@ RUN apk add --no-cache ca-certificates tzdata wget
 WORKDIR /app
 COPY package.json ./
 COPY *.mjs ./
+COPY admin.html ./
 COPY workflows ./workflows
-RUN mkdir -p /app/data
+# 容器以非 root 用户运行时也要能读取静态文件。
+RUN chmod -R a+rX /app && mkdir -p /app/data
 
 ENV NODE_ENV=production
 ENV BRIDGE_HOST=0.0.0.0

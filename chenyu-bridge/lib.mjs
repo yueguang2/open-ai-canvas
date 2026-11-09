@@ -49,12 +49,23 @@ function comfyBase(info) {
 
 async function pollInstance(id, timeoutMs = 300000) {
   const t = Date.now();
+  let sawStarting = false;
+  let first = true;
   while (Date.now() - t < timeoutMs) {
-    const info = await chenyu.info(id);
-    if (statusOf(info) === 2) return info;
+    let info;
+    try { info = await chenyu.info(id); }
+    catch (e) { throw new Error('查询实例状态失败：' + ((e && e.message) || e)); }
+    const st = statusOf(info);
+    if (st === 2) return info;
+    if (STARTING.has(st)) sawStarting = true;
+    // 已经看到"开机中"，却又回到关机态 → 开机失败，尽快反馈
+    if (sawStarting && STOPPED.has(st)) throw new Error('实例开机失败：启动后回到关机状态（上游可能无可用 GPU 或启动异常）');
+    // 长时间一直没进入开机态 → 开机未生效，尽快反馈
+    if (!sawStarting && !first && Date.now() - t > 90000) throw new Error('实例开机未生效：90 秒内仍未进入开机状态，请稍后重试或更换 GPU');
+    first = false;
     await sleep(6000);
   }
-  throw new Error('实例开机超时');
+  throw new Error('实例开机超时（' + Math.round(timeoutMs / 1000) + ' 秒）');
 }
 
 async function ensureBalance() {
@@ -83,6 +94,7 @@ async function gpuHourPrice(gpuUuid) {
 }
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 function ensureBudget(pricePerHour) {
+  if (config.budgetEnabled === false) return;
   if (!(config.dailyBudgetCny > 0)) return;
   const spent = Number((state.budget && state.budget[todayKey()]) || 0);
   const est = pricePerHour * (config.maxRunMinutes / 60);
@@ -281,7 +293,17 @@ export function fillWorkflow(wf, mapping, params, media = {}) {
   return g;
 }
 
-function loadWorkflow(file) { return JSON.parse(fs.readFileSync(path.join(config.workflowsDir, file), 'utf8')); }
+function workflowSearchPaths(file) {
+  return [path.join(config.dataDir, 'workflows', file), path.join(config.workflowsDir, file)];
+}
+export function workflowExists(file) {
+  if (!file) return false;
+  try { return workflowSearchPaths(file).some((p) => fs.existsSync(p)); } catch { return false; }
+}
+function loadWorkflow(file) {
+  const found = workflowSearchPaths(file).find((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  return JSON.parse(fs.readFileSync(found || workflowSearchPaths(file)[1], 'utf8'));
+}
 
 function extractOutput(hist, node, kind) {
   const nodeOut = (hist.outputs || {})[node] || {};
@@ -309,6 +331,8 @@ async function fetchMediaBytes(url) {
 
 // ---------------- 串行 + 空闲关机 ----------------
 const chains = new Map();
+// 在跑 + 排队中的任务数；用于任务结束后判断还有没有排队任务，决定是否立刻关机。
+let pendingTasks = 0;
 function withLock(key, fn) { const prev = chains.get(key) || Promise.resolve(); const next = prev.then(fn, fn); chains.set(key, next.catch(() => {})); return next; }
 const idleTimers = new Map();
 function cancelIdle(key) { const t = idleTimers.get(key); if (t) { clearTimeout(t); idleTimers.delete(key); } }
@@ -353,7 +377,9 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
   const gpuUuid = GPU_ALIASES[gpuAlias] || GPU_ALIASES[preset.defaultGpu];
   const key = preset.pod.uuid + '@' + gpuUuid;
   // 全局串行：并发时排队，同一时间只跑一个生成（省钱）
-  return withLock('__global__', async () => {
+  pendingTasks += 1;
+  try {
+    return await withLock('__global__', async () => {
     cancelIdle(key);
     const startedAt = Date.now();
     let pricePerHour = config.priceFallbackCny;
@@ -400,10 +426,25 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
       fs.writeFileSync(path.join(dir, fname), buf);
       return { file: fname, kind: preset.outputKind };
     } finally {
-      scheduleIdle(key);
+      // 没有排队任务就立刻关机，避免空转计费；有排队任务则保留实例给下一条复用。
+      const queuedAhead = pendingTasks - 1;
+      if (queuedAhead > 0) {
+        scheduleIdle(key); // 队列异常时的兜底；下一条任务开始会 cancelIdle 取消
+      } else {
+        try {
+          const id = state[key];
+          if (id) await chenyu.shutdown(id);
+        } catch (e) {
+          console.error('[chenyu-bridge] 立即关机失败，退回空闲关机：', (e && e.message) || e);
+          scheduleIdle(key);
+        }
+      }
       recordSpend(pricePerHour, Date.now() - startedAt);
     }
   });
+  } finally {
+    pendingTasks -= 1;
+  }
 }
 
 // ---------------- 状态面板数据 ----------------
@@ -424,3 +465,6 @@ export async function bridgeAccount() {
   const spent = Number((state.budget && state.budget[todayKey()]) || 0);
   return { balance: bal ? bal.balance : null, card: bal ? bal.card_balance : null, spendToday: spent, dailyBudgetCny: config.dailyBudgetCny };
 }
+
+// 每日花费历史（用于后台趋势图）。
+export function budgetHistory() { return Object.assign({}, state.budget || {}); }
