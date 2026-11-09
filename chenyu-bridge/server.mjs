@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { config, GPU_ALIASES } from './config.mjs';
 import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles, budgetHistory, workflowExists } from './lib.mjs';
-import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken } from './runtime.mjs';
+import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken, logFileInfo, readLogFile } from './runtime.mjs';
 import { loadPresets, listWorkflows, getWorkflow, upsertWorkflow, deleteWorkflow, saveWorkflowFile, readWorkflowFile, presetsMeta } from './presets.mjs';
 import { analyzeWorkflow } from './workflow-analyzer.mjs';
 
@@ -22,27 +22,28 @@ try { PKG = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url
 const ADMIN_HTML = fs.readFileSync(new URL('./admin.html', import.meta.url), 'utf8');
 const PUBLIC_BASE = (process.env.BRIDGE_PUBLIC_BASE || `http://127.0.0.1:${config.port}`).replace(/\/$/, '');
 
-const tasks = new Map(); // id -> { id,status,url,message,kind,model,params,createdAt,updatedAt }
-const TASKS_FILE = path.join(config.dataDir, 'tasks.json');
-try { for (const t of JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8'))) if (t && t.id) tasks.set(t.id, t); } catch {}
+const tasks = new Map(); // id -> { id,status,url,message,kind,model,params,dedupKey,_session,createdAt,updatedAt }
+const tasksFilePath = () => path.join(config.dataDir, 'tasks.json');
 let persistTimer = null;
+function stripSession(t) { const { _session, ...rest } = t; return rest; }
+function persistTasksNow() {
+  try { fs.mkdirSync(config.dataDir, { recursive: true }); fs.writeFileSync(tasksFilePath(), JSON.stringify(Array.from(tasks.values()).slice(-400).map(stripSession))); } catch {}
+}
 function persistTasks() {
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    try { fs.mkdirSync(config.dataDir, { recursive: true }); fs.writeFileSync(TASKS_FILE, JSON.stringify(Array.from(tasks.values()).slice(-400))); } catch {}
-  }, 400);
+  persistTimer = setTimeout(persistTasksNow, 400);
 }
-
-// ---- 重启恢复：上次未完成的任务标记失败，避免影策一直轮询“进行中” ----
-let recoveredTasks = 0;
-for (const t of tasks.values()) {
-  if (t.status === 'running' || t.status === 'pending') {
-    t.status = 'failed'; t.message = '桥接服务重启，任务已中断，请重试'; t.updatedAt = Date.now(); recoveredTasks += 1;
+// 启动/建服时加载任务并做重启恢复（路径按当前 dataDir 解析，适配测试与迁移后的数据目录）
+function hydrateTasks() {
+  tasks.clear();
+  try { for (const t of JSON.parse(fs.readFileSync(tasksFilePath(), 'utf8'))) if (t && t.id) tasks.set(t.id, t); } catch {}
+  let recoveredTasks = 0;
+  for (const t of tasks.values()) {
+    if (t.status === 'running' || t.status === 'pending') {
+      t.status = 'failed'; t.message = '桥接服务重启，任务已中断，请重试'; t.updatedAt = Date.now(); recoveredTasks += 1;
+    }
   }
-}
-if (recoveredTasks) {
-  try { fs.mkdirSync(config.dataDir, { recursive: true }); fs.writeFileSync(TASKS_FILE, JSON.stringify(Array.from(tasks.values()).slice(-400))); } catch {}
-  logEvent('warn', `重启恢复：${recoveredTasks} 个未完成任务标记为失败`);
+  if (recoveredTasks) { persistTasksNow(); logEvent('warn', `重启恢复：${recoveredTasks} 个未完成任务标记为失败`); }
 }
 
 // ---- 限流 / 队列上限 / 幂等去重 ----
@@ -67,6 +68,7 @@ function findDuplicate(dedupKey) {
   const now = Date.now();
   for (const t of tasks.values()) {
     if (t.dedupKey !== dedupKey) continue;
+    if (!t._session) continue; // 仅对本次进程创建的任务去重，避免命中历史/重启前任务
     if (now - (t.createdAt || 0) > DEDUP_WINDOW_MS) continue;
     if (t.status === 'running' || t.status === 'pending' || t.status === 'succeeded') return t;
   }
@@ -116,8 +118,14 @@ function startTask(task, presetKey, gpuAlias, params) {
   logEvent('info', `任务开始 ${task.id} ${task.kind || ''} ${task.model || presetKey + '@' + gpuAlias}`);
   persistTasks();
   runTask(presetKey, gpuAlias, params, task.id, (s) => { task.message = s; task.updatedAt = Date.now(); })
-    .then((r) => { task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); persistTasks(); })
-    .catch((e) => { task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); persistTasks(); });
+    .then((r) => {
+      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); return; }
+      task.status = 'succeeded'; task.kind = r.kind; task.url = `${PUBLIC_BASE}/files/${r.file}`; task.message = null; task.updatedAt = Date.now(); logEvent('info', `任务成功 ${task.id}`); persistTasks();
+    })
+    .catch((e) => {
+      if (task.cancelled) { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); logEvent('info', `任务已取消 ${task.id}`); persistTasks(); return; }
+      task.status = 'failed'; task.message = String((e && e.message) || e); task.updatedAt = Date.now(); logEvent('error', `任务失败 ${task.id}: ${task.message}`); persistTasks();
+    });
 }
 
 function dirUsage(dir) {
@@ -157,7 +165,7 @@ async function handle(req, res) {
     if (dup) { logEvent('info', `幂等命中：复用任务 ${dup.id}`); return send(res, 200, { id: dup.id, status: dup.status === 'succeeded' ? 'succeeded' : 'pending', object: 'video' }); }
     if (!submissionGuard(res)) return;
     const id = newId();
-    const task = { id, status: 'pending', url: null, message: null, kind: config.presets[presetKey].capability, model: body.model, params, dedupKey, createdAt: Date.now(), updatedAt: Date.now() };
+    const task = { id, status: 'pending', url: null, message: null, kind: config.presets[presetKey].capability, model: body.model, params, dedupKey, _session: true, createdAt: Date.now(), updatedAt: Date.now() };
     tasks.set(id, task);
     startTask(task, presetKey, gpuAlias, params);
     return send(res, 200, { id, status: 'pending', object: 'video' });
@@ -178,7 +186,7 @@ async function handle(req, res) {
     }
     if (!submissionGuard(res)) return;
     const id = newId();
-    const task = { id, status: 'running', url: null, message: null, kind: 'image', model: body.model, params, dedupKey, createdAt: Date.now(), updatedAt: Date.now() };
+    const task = { id, status: 'running', url: null, message: null, kind: 'image', model: body.model, params, dedupKey, _session: true, createdAt: Date.now(), updatedAt: Date.now() };
     tasks.set(id, task);
     logEvent('info', `任务开始 ${id} image ${body.model}`);
     persistTasks();
@@ -194,11 +202,34 @@ async function handle(req, res) {
     }
   }
 
+  const vcancel = /^\/v1\/videos\/([^/]+)\/cancel$/.exec(p);
+  if (req.method === 'POST' && vcancel) {
+    const task = tasks.get(decodeURIComponent(vcancel[1]));
+    if (!task) return send(res, 404, { error: { message: '任务不存在' } });
+    task.cancelled = true;
+    if (task.status === 'pending' || task.status === 'running') { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); }
+    logEvent('info', `取消任务 ${task.id}`);
+    persistTasks();
+    try { const insts = await bridgeInstances(); for (const it of insts) { if (it.status === 2) { try { await chenyu.shutdown(it.instanceId); } catch {} } } } catch {}
+    return send(res, 200, { ok: true, id: task.id, status: 'cancelled' });
+  }
   const vm = /^\/v1\/videos\/([^/]+)$/.exec(p);
   if (req.method === 'GET' && vm) {
     const task = tasks.get(decodeURIComponent(vm[1]));
     if (!task) return send(res, 200, { id: vm[1], status: 'failed', message: '任务不存在' });
-    return send(res, 200, { id: task.id, status: task.status, video_url: task.url || undefined, message: task.message || undefined });
+    const st = task.status === 'cancelled' ? 'failed' : task.status;
+    const msg = task.status === 'cancelled' ? '任务已取消' : (task.message || undefined);
+    return send(res, 200, { id: task.id, status: st, video_url: task.url || undefined, message: msg });
+  }
+  if (req.method === 'DELETE' && vm) {
+    const task = tasks.get(decodeURIComponent(vm[1]));
+    if (!task) return send(res, 404, { error: { message: '任务不存在' } });
+    task.cancelled = true;
+    if (task.status === 'pending' || task.status === 'running') { task.status = 'cancelled'; task.message = '任务已取消'; task.updatedAt = Date.now(); }
+    logEvent('info', `取消任务(DELETE) ${task.id}`);
+    persistTasks();
+    try { const insts = await bridgeInstances(); for (const it of insts) { if (it.status === 2) { try { await chenyu.shutdown(it.instanceId); } catch {} } } } catch {}
+    return send(res, 200, { ok: true, id: task.id, status: 'cancelled' });
   }
 
   if (req.method === 'GET' && p.startsWith('/files/')) {
@@ -231,6 +262,12 @@ async function handle(req, res) {
   if (req.method === 'GET' && p === '/api/bridge/gpus') { try { return send(res, 200, (await chenyu.gpuList()) || {}); } catch (e) { return send(res, 502, { error: String((e && e.message) || e), gpu_list: [] }); } }
   if (req.method === 'GET' && p === '/api/bridge/logs') return send(res, 200, { logs: recentLogs(u.searchParams.get('limit') || 300) });
   if (req.method === 'POST' && p === '/api/bridge/logs/clear') { clearLogs(); return send(res, 200, { ok: true }); }
+  if (req.method === 'GET' && p === '/api/bridge/logs/fileinfo') return send(res, 200, logFileInfo());
+  if (req.method === 'GET' && p === '/api/bridge/logs/download') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': 'attachment; filename="bridge.log"' });
+    res.end(readLogFile() || '');
+    return;
+  }
   if (req.method === 'GET' && p === '/api/bridge/settings') return send(res, 200, { settings: currentSettings(), apiBase: config.apiBase, port: config.port, publicBase: PUBLIC_BASE });
   if (req.method === 'PUT' && p === '/api/bridge/settings') {
     try { const body = await jsonBody(req); return send(res, 200, { ok: true, settings: saveRuntimeSettings(body) }); }
@@ -358,7 +395,7 @@ async function handle(req, res) {
       media: [],
     };
     const id = newId();
-    const task = { id, status: 'pending', url: null, message: null, kind: preset.capability, model, params, source: 'admin-test', createdAt: Date.now(), updatedAt: Date.now() };
+    const task = { id, status: 'pending', url: null, message: null, kind: preset.capability, model, params, source: 'admin-test', _session: true, createdAt: Date.now(), updatedAt: Date.now() };
     tasks.set(id, task);
     startTask(task, presetKey, gpuAlias, params);
     return send(res, 200, { ok: true, id });
@@ -372,7 +409,7 @@ async function handle(req, res) {
     const { presetKey, gpuAlias } = parseModel(old.model);
     if (!config.presets[presetKey]) return send(res, 400, { ok: false, error: '模型已不存在' });
     const id = newId();
-    const task = { id, status: 'pending', url: null, message: null, kind: old.kind, model: old.model, params: old.params, source: 'retry', createdAt: Date.now(), updatedAt: Date.now() };
+    const task = { id, status: 'pending', url: null, message: null, kind: old.kind, model: old.model, params: old.params, source: 'retry', _session: true, createdAt: Date.now(), updatedAt: Date.now() };
     tasks.set(id, task);
     startTask(task, presetKey, gpuAlias, old.params);
     return send(res, 200, { ok: true, id });
@@ -394,6 +431,7 @@ async function handle(req, res) {
 }
 
 export function createBridgeServer() {
+  hydrateTasks();
   return http.createServer((req, res) => {
     handle(req, res).catch((e) => { try { send(res, 500, { error: { message: String((e && e.message) || e) } }); } catch {} });
   });

@@ -94,15 +94,25 @@ export function currentAdminToken() {
   return t || '';
 }
 
-// ---------------- 内存日志 ----------------
+// ---------------- 内存 + 文件日志 ----------------
 const LOGS = [];
 const LOG_MAX = 800;
+const LOG_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const logFilePath = () => path.join(config.dataDir, 'bridge.log');
 function safeJson(v) { try { return JSON.stringify(v); } catch { return String(v); } }
+function appendLogFile(level, msg) {
+  try {
+    fs.mkdirSync(config.dataDir, { recursive: true });
+    try { const st = fs.statSync(logFilePath()); if (st.size > LOG_FILE_MAX_BYTES) { try { fs.renameSync(logFilePath(), logFilePath() + '.1'); } catch {} } } catch {}
+    fs.appendFileSync(logFilePath(), new Date().toISOString() + ' ' + String(level).toUpperCase() + ' ' + msg + '\n');
+  } catch {}
+}
 function pushLog(level, args) {
   try {
     const msg = args.map((a) => (typeof a === 'string' ? a : (a && a.message) || safeJson(a))).join(' ').slice(0, 1200);
     LOGS.push({ t: Date.now(), level, msg });
     if (LOGS.length > LOG_MAX) LOGS.shift();
+    appendLogFile(level, msg);
   } catch {}
 }
 export function logEvent(level, msg) { pushLog(level, [msg]); }
@@ -111,11 +121,22 @@ let installed = false;
 export function installLogCapture() {
   if (installed) return;
   installed = true;
+  // 重启后从日志文件尾部恢复最近记录，便于排障
+  try {
+    const lines = fs.readFileSync(logFilePath(), 'utf8').trim().split('\n').slice(-LOG_MAX);
+    for (const line of lines) {
+      const m = /^(\S+) (\w+) ([\s\S]*)$/.exec(line);
+      if (m) LOGS.push({ t: Date.parse(m[1]) || Date.now(), level: m[2].toLowerCase(), msg: m[3] });
+    }
+  } catch {}
   for (const level of ['log', 'warn', 'error']) {
     const orig = console[level].bind(console);
     console[level] = (...args) => { orig(...args); pushLog(level, args); };
   }
 }
+
+export function logFileInfo() { try { const st = fs.statSync(logFilePath()); return { path: logFilePath(), size: st.size }; } catch { return { path: logFilePath(), size: 0 }; } }
+export function readLogFile() { try { return fs.readFileSync(logFilePath(), 'utf8'); } catch { return ''; } }
 
 export function recentLogs(limit = 200) {
   const n = Math.max(1, Math.min(LOG_MAX, Number(limit) || 200));
