@@ -273,6 +273,16 @@ function applyMediaSlots(g, mapping, media) {
   }
 }
 
+function aspectPixelSize(ratio, megapixels) {
+  const m = /^(\d+):(\d+)$/.exec(String(ratio || ''));
+  if (!m) return null;
+  const ar = Number(m[1]) / Number(m[2]);
+  if (!(ar > 0)) return null;
+  const area = Math.max(0.1, Number(megapixels) || 1) * 1e6;
+  const w = Math.sqrt(area * ar), h = w / ar;
+  const r16 = (x) => Math.max(64, Math.round(x / 16) * 16);
+  return { width: r16(w), height: r16(h) };
+}
 export function fillWorkflow(wf, mapping, params, media = {}) {
   const g = structuredClone(wf);
   if (mapping.prompt && params.prompt != null) setIn(g, mapping.prompt.node, mapping.prompt.input, String(params.prompt));
@@ -287,6 +297,17 @@ export function fillWorkflow(wf, mapping, params, media = {}) {
     if (!(mp > 0)) mp = parseMegapixels(params.resolution);
     if (!(mp > 0)) mp = mapping.megapixels.default;
     if (mp > 0) setIn(g, mapping.megapixels.node, mapping.megapixels.input, mp);
+  }
+  // 无 ResolutionSelector 的工作流：按 EmptyLatent 的 width/height 直接写像素
+  if ((mapping.sizeWidth || mapping.sizeHeight) && params.ratio) {
+    let mp = params.megapixels != null ? Number(params.megapixels) : null;
+    if (!(mp > 0)) mp = parseMegapixels(params.resolution);
+    if (!(mp > 0)) mp = 1;
+    const dims = aspectPixelSize(params.ratio, mp);
+    if (dims) {
+      if (mapping.sizeWidth) setIn(g, mapping.sizeWidth.node, mapping.sizeWidth.input, dims.width);
+      if (mapping.sizeHeight) setIn(g, mapping.sizeHeight.node, mapping.sizeHeight.input, dims.height);
+    }
   }
   const m = Array.isArray(media) ? { images: media } : (media || {});
   applyMediaSlots(g, mapping, m);

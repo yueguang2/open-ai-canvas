@@ -39,15 +39,25 @@ export function analyzeWorkflow(input) {
   if (!promptNode) for (const [id, n] of nodes) { const ins = n.inputs || {}; if (/promptoptimizer/.test(cls(n)) && '用户提示词' in ins) setPrompt(id, '用户提示词'); }
   if (promptNode) { mapping.prompt = { node: promptNode, input: promptInput }; notes.push(`提示词 → 节点 ${promptNode}.${promptInput}`); }
   else warnings.push('未找到提示词输入节点');
+  const clipTexts = nodes.filter(([, n]) => /cliptextencode/.test(cls(n)) && 'text' in (n.inputs || {}));
+  if (clipTexts.length > 1) notes.push(`检测到 ${clipTexts.length} 个 CLIPTextEncode，已选最长文本作正向提示词（负向保持工作流默认；如不对请手动改 mapping.prompt）`);
 
-  // 比例 / 画质（ResolutionSelector）
-  const rs = nodes.find(([, n]) => cls(n) === 'resolutionselector' || cls(n).includes('resolutionselector'));
+  // 比例 / 画质：优先 ResolutionSelector；否则用 EmptyLatent 的 width/height
+  const rs = nodes.find(([, n]) => cls(n).includes('resolutionselector'));
   if (rs) {
     const [id, n] = rs; const ins = n.inputs || {};
     if ('aspect_ratio' in ins) mapping.aspect = { node: id, input: 'aspect_ratio' };
     if ('megapixels' in ins) mapping.megapixels = { node: id, input: 'megapixels', default: Number(ins.megapixels) || (outputKind === 'video' ? 1.5 : 3) };
     notes.push(`比例/画质 → 节点 ${id}`);
-  } else warnings.push('未找到 ResolutionSelector（比例/画质）节点');
+  } else {
+    const latent = nodes.find(([, n]) => /emptylatentimage|emptyflux2latentimage|emptylatent/.test(cls(n)) && (n.inputs || {}).width !== undefined && (n.inputs || {}).height !== undefined);
+    if (latent) {
+      const [id] = latent;
+      mapping.sizeWidth = { node: id, input: 'width' };
+      mapping.sizeHeight = { node: id, input: 'height' };
+      notes.push(`尺寸 → 节点 ${id}.width/height（无 ResolutionSelector，按比例+画质换算像素）`);
+    } else warnings.push('未找到 ResolutionSelector 或 EmptyLatent 尺寸节点（比例/画质需手填）');
+  }
 
   // 种子
   for (const [id, n] of nodes) { const ins = n.inputs || {}; if (!mapping.seed && 'seed' in ins) { mapping.seed = { node: id, input: 'seed' }; notes.push(`种子 → 节点 ${id}`); break; } }
