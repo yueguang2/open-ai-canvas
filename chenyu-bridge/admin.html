@@ -210,7 +210,7 @@ async function refresh(){
     $('lastUpdated').textContent='更新于 '+clock();
     if(S.view==='logs')await loadLogs();
     render();
-  }catch(e){$('connDot').className='dot err';$('connText').textContent='连接失败';toast(e.message,true);}
+  }catch(e){$('connDot').className='dot err';$('connText').textContent='连接失败';const m=String((e&&e.message)||e);const now=Date.now();if(m!==window.__lastErr||now-(window.__lastErrAt||0)>15000){toast(m,true);window.__lastErr=m;window.__lastErrAt=now;}}
 }
 async function loadLogs(){try{const r=await api('/api/bridge/logs?limit=400');S.logs=r.logs||[];}catch(e){}}
 function render(){const c=$('content');
@@ -235,7 +235,7 @@ function viewOverview(){
   for(let i=6;i>=0;i--){const dt=new Date(now.getTime()-i*86400000);const k=dt.toISOString().slice(0,10);days.push([k,Number(bh[k]||0)]);}
   const maxv=Math.max(0.01,...days.map(x=>x[1]));
   const bars=days.map(([k,v])=>'<div class="b"><div class="bar" style="height:'+Math.max(3,Math.round(v/maxv*100))+'%" title="'+k+' '+money(v)+'"></div><div class="lbl">'+k.slice(5)+'</div></div>').join('');
-  const instRows=(d.instances||[]).length?d.instances.map(it=>'<tr><td style="font-weight:600">'+esc(it.gpuName||'—')+'</td><td>'+istatus(it.status)+'</td><td class="mono muted">'+esc((it.instanceId||'').slice(0,10))+'…</td></tr>').join(''):'<tr><td colspan="3" class="empty">无实例</td></tr>';
+  const instRows=(d.instances||[]).length?d.instances.map(it=>'<tr><td style="font-weight:600">'+esc(it.gpuName||'—')+'</td><td>'+istatus(it.status)+'</td><td class="mono muted">'+esc(String(it.instanceId||'').slice(0,10))+'…</td></tr>').join(''):'<tr><td colspan="3" class="empty">无实例</td></tr>';
   const recent=S.tasks.slice(0,6);
   const recentRows=recent.length?recent.map(t=>'<tr><td class="muted">'+rel(t.createdAt)+'</td><td>'+esc(t.kind||'')+'</td><td>'+tstatus(t.status)+'</td><td class="mono muted">'+esc((t.id||'').slice(0,12))+'</td></tr>').join(''):'<tr><td colspan="4" class="empty">暂无任务</td></tr>';
   const needKey=!(S.sys&&S.sys.apiKeyConfigured);
@@ -262,7 +262,7 @@ function viewInstances(){
   const rows=insts.length?insts.map(it=>{
     const run=it.status===2,stopped=[0,4,22,23].includes(it.status),busy=!run&&!stopped;
     return '<tr><td style="font-weight:600">'+esc(it.gpuName||'—')+'</td>'+
-      '<td class="mono muted" title="'+esc(it.instanceId)+'">'+esc((it.instanceId||'').slice(0,14))+'…</td>'+
+      '<td class="mono muted" title="'+esc(it.instanceId)+'">'+esc(String(it.instanceId||'').slice(0,14))+'…</td>'+
       '<td>'+istatus(it.status)+'</td>'+
       '<td><div style="display:flex;gap:7px;flex-wrap:wrap">'+
         '<button class="sm" data-act="startup" data-id="'+esc(it.instanceId)+'" '+(run||busy?'disabled':'')+'>开机</button>'+

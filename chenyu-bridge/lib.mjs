@@ -362,9 +362,9 @@ function scheduleIdle(key) { cancelIdle(key); const t = setTimeout(async () => {
 // 进程重启后：对已知且仍在运行的实例重新挂上空闲关机，避免“孤儿实例”一直烧 GPU。
 export async function armIdleForKnownInstances() {
   for (const key of Object.keys(state)) {
-    if (key === 'budget') continue;
+    if (key === 'budget' || key === 'balanceBaseline') continue;
     const id = state[key];
-    if (!id) continue;
+    if (typeof id !== 'string' || !id) continue;
     try { const info = await chenyu.info(id); if (statusOf(info) === 2) scheduleIdle(key); } catch {}
   }
 }
@@ -472,7 +472,8 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
 export async function bridgeInstances() {
   const out = [];
   for (const [key, id] of Object.entries(state)) {
-    if (key === 'budget') continue;
+    if (key === 'budget' || key === 'balanceBaseline') continue;
+    if (typeof id !== 'string' || !id) continue;
     const item = { key, instanceId: id, status: null, gpuName: '', title: '' };
     try { const info = await chenyu.info(id); item.status = info.status; item.gpuName = info.gpu_name || ''; item.title = info.title || ''; }
     catch (e) { item.status = 'error'; item.error = String((e && e.message) || e); }
