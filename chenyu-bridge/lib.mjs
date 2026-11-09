@@ -92,14 +92,17 @@ async function gpuHourPrice(gpuUuid) {
   const p = gpuPriceCache.map[gpuUuid];
   return isFinite(p) && p > 0 ? p : config.priceFallbackCny;
 }
-function todayKey() { return new Date().toISOString().slice(0, 10); }
-function ensureBudget(pricePerHour) {
+function todayKey() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+async function ensureBudget(pricePerHour) {
   if (config.budgetEnabled === false) return;
   if (!(config.dailyBudgetCny > 0)) return;
-  const spent = Number((state.budget && state.budget[todayKey()]) || 0);
+  const spentTasks = Number((state.budget && state.budget[todayKey()]) || 0);
   const est = pricePerHour * (config.maxRunMinutes / 60);
+  let spentBal = null;
+  try { const a = await bridgeAccount(); spentBal = a.spendTodayByBalance; } catch {}
+  const spent = Math.max(spentTasks, spentBal != null ? Number(spentBal) : 0);
   if (spent + est > config.dailyBudgetCny) {
-    throw new Error(`今日预算不足：已花 ¥${spent.toFixed(3)}，本次预计 ≥¥${est.toFixed(3)}，上限 ¥${config.dailyBudgetCny}`);
+    throw new Error(`今日预算不足：已花 ¥${spent.toFixed(3)}（任务估算/余额差取大），本次预计 ≥¥${est.toFixed(3)}，上限 ¥${config.dailyBudgetCny}`);
   }
 }
 function recordSpend(pricePerHour, elapsedMs) {
@@ -406,7 +409,7 @@ export async function runTask(presetKey, gpuAlias, params, taskId, onStage = () 
     let pricePerHour = config.priceFallbackCny;
     try {
       pricePerHour = await gpuHourPrice(gpuUuid);
-      ensureBudget(pricePerHour);
+      await ensureBudget(pricePerHour);
       onStage('准备实例（未运行则开机）');
       const { info } = await instanceFor(presetKey, gpuAlias);
       const base = comfyBase(info);

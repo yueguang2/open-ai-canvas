@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { config, GPU_ALIASES } from './config.mjs';
 import { runTask, parseModel, chenyu, bridgeInstances, bridgeAccount, armIdleForKnownInstances, pruneOldFiles, budgetHistory, workflowExists, warmInstance } from './lib.mjs';
-import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken, logFileInfo, readLogFile } from './runtime.mjs';
+import { loadRuntimeSettings, currentSettings, saveRuntimeSettings, installLogCapture, recentLogs, clearLogs, logEvent, currentAdminToken, logFileInfo, readLogFile, currentBridgeApiKey } from './runtime.mjs';
 import { loadPresets, listWorkflows, getWorkflow, upsertWorkflow, deleteWorkflow, saveWorkflowFile, readWorkflowFile, presetsMeta } from './presets.mjs';
 import { analyzeWorkflow } from './workflow-analyzer.mjs';
 
@@ -101,6 +101,14 @@ function adminAllowed(req, url) {
   const q = url.searchParams.get('token');
   return header === token || q === token;
 }
+// 业务接口鉴权（/v1/*）：配置了 key 才校验，支持 Authorization: Bearer 或 x-api-key。
+function businessAllowed(req) {
+  const key = currentBridgeApiKey();
+  if (!key) return true;
+  const auth = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+  const hk = String(req.headers['x-api-key'] || '').trim();
+  return auth === key || hk === key;
+}
 
 function newId() { return 'cy_' + crypto.randomBytes(8).toString('hex'); }
 function send(res, code, obj, type = 'application/json') {
@@ -163,6 +171,7 @@ async function handle(req, res) {
     return;
   }
   if (p.startsWith('/api/bridge/') && !adminAllowed(req, u)) return send(res, 401, { error: 'unauthorized' });
+  if (p.startsWith('/v1/') && !businessAllowed(req)) return send(res, 401, { error: { message: 'unauthorized（业务接口需要 API Key）' } });
 
   // ------- 影策对接接口 -------
   if (req.method === 'GET' && p === '/healthz') return send(res, 200, { ok: true, presets: Object.keys(config.presets), version: PKG.version, apiKeyConfigured: !!config.apiKey });
@@ -380,7 +389,7 @@ async function handle(req, res) {
       version: PKG.version, node: process.version, platform: process.platform, arch: process.arch,
       uptimeSec: Math.round(process.uptime()), memory: process.memoryUsage(),
       dataDir: config.dataDir, filesCount: files.files, filesBytes: files.bytes,
-      apiKeyConfigured: !!config.apiKey, adminTokenSet: !!currentAdminToken(),
+      apiKeyConfigured: !!config.apiKey, adminTokenSet: !!currentAdminToken(), businessAuthEnabled: !!currentBridgeApiKey(),
       queue: { pending: queuedCount(), maxQueue: MAX_QUEUE, ratePerMin: RATE_PER_MIN },
       publicBase: PUBLIC_BASE, port: config.port, apiBase: config.apiBase,
       presets: Object.keys(config.presets),

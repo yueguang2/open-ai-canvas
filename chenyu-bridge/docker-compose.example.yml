@@ -12,6 +12,8 @@ services:
       BRIDGE_PUBLIC_BASE: ${BRIDGE_PUBLIC_BASE:-}
       # 公网部署建议设置；不设则后台开放
       BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:-}
+      # 业务接口密钥（/v1/*）；为空则开放，公网建议设置
+      BRIDGE_API_KEY: ${BRIDGE_API_KEY:-}
       # 也可留空，启动后在后台「设置」里填写晨羽 API Key
       CHENYU_API_KEY: ${CHENYU_API_KEY:-}
       TZ: Asia/Shanghai

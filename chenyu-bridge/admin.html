@@ -413,6 +413,7 @@ function viewSettings(){
       '<div class="field" style="grid-column:1/-1"><label>晨羽 API Key（必需）</label><input type="password" id="f_chenyuApiKey" placeholder="'+(s.hasChenyuApiKey?'已配置，留空则不变':'未配置，请填写晨羽 API Key')+'"/><div class="hint">在「晨羽智云」个人中心获取；留空不修改，输入 - 表示清除。仅保存在服务端。</div></div>'+
       '<div class="field"><label>预算保护</label><div class="rowflex"><label class="toggle"><input type="checkbox" id="f_budgetEnabled" '+(s.budgetEnabled!==false?'checked':'')+'/><span class="sl"></span></label><span class="muted" style="font-size:12px">开启后按每日预算拦截</span></div></div>'+
       '<div class="field"><label>管理口令</label><input type="password" id="f_adminToken" placeholder="'+(s.hasAdminToken?'已设置，留空则不变':'未设置')+'"/><div class="hint">设置后 /api/bridge/* 需口令；留空不修改，输入 - 表示清除</div></div>'+
+      '<div class="field"><label>业务接口密钥（可选）</label><input type="password" id="f_bridgeApiKey" placeholder="'+(s.hasBridgeApiKey?'已设置，留空则不变':'未设置（/v1/* 开放）')+'"/><div class="hint">设置后 /v1/* 需 Bearer 或 x-api-key；留空不修改，输入 - 表示清除</div></div>'+
       '<div class="form-actions"><span class="muted" id="saveHint"></span><button class="primary" id="saveSettings">保存设置</button></div>'+
     '</div></div>'+
     '<div class="card"><div class="card-h"><h3>系统诊断</h3></div><div class="info-list">'+
@@ -451,7 +452,7 @@ function viewApi(){
   return '<div class="sec card"><div class="card-h"><h3>接入信息</h3><div class="right muted">把地址给到任意客户端 / 影策</div></div><div class="info-list">'+
       info('服务地址',esc(base))+
       info('管理后台',esc(base+'/admin'))+
-      info('鉴权','<span class="muted">业务接口无需鉴权；仅 /api/bridge/* 受管理口令保护</span>')+
+      info('鉴权',(S.sys&&S.sys.businessAuthEnabled)?'<span class="pill p-ok">已开启（Bearer / x-api-key）</span>':'<span class="muted">业务接口无需鉴权（仅 /api/bridge/* 受管理口令保护）</span>')+
     '</div></div>'+
     '<div class="sec card"><div class="card-h"><h3>接口一览</h3></div><table><thead><tr><th>接口</th><th>方法</th><th>说明</th></tr></thead><tbody>'+
       row(base+'/v1/models','GET','列出可用模型（预设@GPU）')+
@@ -553,6 +554,7 @@ async function saveSettings(){
   const btn=$('saveSettings');btn.disabled=true;const hint=$('saveHint');if(hint)hint.textContent='保存中…';
   const body={idleMinutes:Number($('f_idleMinutes').value),dailyBudgetCny:Number($('f_dailyBudgetCny').value),minBalance:Number($('f_minBalance').value),priceFallbackCny:Number($('f_priceFallbackCny').value),budgetEnabled:$('f_budgetEnabled').checked};
   const tk=$('f_adminToken').value; if(tk!==''){ body.adminToken = tk==='-' ? '' : tk; }
+  const bk=$('f_bridgeApiKey'); if(bk && bk.value!==''){ body.bridgeApiKey = bk.value==='-' ? '' : bk.value; }
   const ak=$('f_chenyuApiKey'); if(ak && ak.value!==''){ body.chenyuApiKey = ak.value; }
   try{await api('/api/bridge/settings',{method:'PUT',body:JSON.stringify(body)});if(hint)hint.textContent='已保存';toast('设置已保存');setTimeout(refresh,800);}
   catch(e){if(hint)hint.textContent='';toast('保存失败：'+e.message,true);}btn.disabled=false;

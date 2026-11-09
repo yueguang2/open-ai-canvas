@@ -6,6 +6,7 @@ import { config } from './config.mjs';
 const settingsPath = () => path.join(config.dataDir, 'settings.json');
 let adminTokenOverride = null;
 let chenyuApiKeyOverride = null;
+let bridgeApiKeyOverride = null;
 const envApiKey = (process.env.CHENYU_API_KEY || '').trim();
 
 function clampNum(v, min, max, def) {
@@ -39,6 +40,10 @@ function applySettings(s) {
     chenyuApiKeyOverride = t || null;
     config.apiKey = chenyuApiKeyOverride || envApiKey;
   }
+  if (s.bridgeApiKey !== undefined) {
+    const t = String(s.bridgeApiKey == null ? '' : s.bridgeApiKey).trim();
+    bridgeApiKeyOverride = t ? t.slice(0, 200) : null;
+  }
 }
 
 export function loadRuntimeSettings() {
@@ -55,6 +60,7 @@ export function currentSettings() {
     budgetEnabled: config.budgetEnabled !== false,
     hasAdminToken: !!(adminTokenOverride || (process.env.BRIDGE_ADMIN_TOKEN || '').trim()),
     hasChenyuApiKey: !!config.apiKey,
+    hasBridgeApiKey: !!currentBridgeApiKey(),
   };
 }
 
@@ -69,6 +75,7 @@ export function saveRuntimeSettings(patch) {
     budgetEnabled: clampBool(patch.budgetEnabled != null ? patch.budgetEnabled : cur.budgetEnabled, cur.budgetEnabled),
   };
   if (patch.adminToken !== undefined) next.adminToken = String(patch.adminToken == null ? '' : patch.adminToken).trim().slice(0, 200);
+  if (patch.bridgeApiKey !== undefined) next.bridgeApiKey = String(patch.bridgeApiKey == null ? '' : patch.bridgeApiKey).trim().slice(0, 200);
   // 晨羽 API Key：'—' 或 '-' 表示清除；空串表示不变；有值则覆盖。
   if (patch.chenyuApiKey !== undefined) {
     const t = String(patch.chenyuApiKey == null ? '' : patch.chenyuApiKey).trim();
@@ -91,6 +98,11 @@ export function saveRuntimeSettings(patch) {
 // 当前生效的管理口令：后台设置优先，其次环境变量。
 export function currentAdminToken() {
   const t = adminTokenOverride != null ? adminTokenOverride : (process.env.BRIDGE_ADMIN_TOKEN || '').trim();
+  return t || '';
+}
+// 业务接口密钥（/v1/*）：后台设置优先，其次环境变量；为空表示不校验。
+export function currentBridgeApiKey() {
+  const t = bridgeApiKeyOverride != null ? bridgeApiKeyOverride : (process.env.BRIDGE_API_KEY || '').trim();
   return t || '';
 }
 

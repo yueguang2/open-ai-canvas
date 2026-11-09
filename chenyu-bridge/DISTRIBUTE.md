@@ -19,6 +19,7 @@ docker run -d --name chenyu-bridge \
 | 变量 | 说明 |
 | --- | --- |
 | `BRIDGE_ADMIN_TOKEN` | 管理口令；设置后 `/api/bridge/*` 与开关机需口令。建议公网部署时设置 |
+| `BRIDGE_API_KEY` | 业务接口密钥；设置后 `/v1/*` 需 `Authorization: Bearer` 或 `x-api-key`，为空则开放。公网暴露时建议设置 |
 | `CHENYU_API_KEY` | 晨羽 API Key；也可不设，启动后在后台「设置」里填 |
 | `BRIDGE_PUBLIC_BASE` | 对外访问地址（如 `http://你的域名:3400`），用于返回产物链接 |
 | `BRIDGE_PORT` | 默认 3400 |
