@@ -58,26 +58,10 @@ done
 echo "==> 配置本机 Magpie 渠道（首次会注册管理员 admin / Admin123456）"
 node "$ROOT/scripts/configure-local-magpie.mjs" || echo "    (Magpie 配置失败：确认本机 Magpie 在 127.0.0.1:3425 运行)"
 
-# ---- 晨羽桥接（有 Key 才启动）----
-BRIDGE_PORT="${BRIDGE_PORT:-3400}"
+# ---- 晨羽桥接已拆分为独立项目（/home/yueguang/DSH/云GPU中间件）----
+# 本脚本不再启动/配置中间件；请在中间件项目内部署（docker compose up -d）。
 if [ -n "${CHENYU_API_KEY:-}" ]; then
-  echo "==> 启动晨羽桥接 127.0.0.1:${BRIDGE_PORT}"
-  ( cd "$ROOT/chenyu-bridge" && exec env \
-      CHENYU_API_KEY="$CHENYU_API_KEY" \
-      BRIDGE_PORT="$BRIDGE_PORT" \
-      BRIDGE_DAILY_BUDGET_CNY="${BRIDGE_DAILY_BUDGET_CNY:-5}" \
-      BRIDGE_IDLE_MINUTES="${BRIDGE_IDLE_MINUTES:-10}" \
-      node server.mjs ) >"$ROOT/.local/chenyu-bridge.log" 2>&1 &
-  BRIDGE_PID=$!; PIDS+=("$BRIDGE_PID")
-  echo "    bridge pid=$BRIDGE_PID  log=.local/chenyu-bridge.log"
-  for i in $(seq 1 30); do
-    if curl -sf -o /dev/null "http://127.0.0.1:${BRIDGE_PORT}/healthz"; then break; fi
-    sleep 1
-  done
-  echo "==> 同步晨羽模型到影策（幂等）"
-  node "$ROOT/chenyu-bridge/configure-chenyu.mjs" || echo "    (晨羽渠道配置失败，可稍后重跑 chenyu-bridge/configure-chenyu.mjs)"
-else
-  echo "==> 未配置 CHENYU_API_KEY，跳过晨羽桥接（写 .local/chenyu.env 即可自动启用）"
+  echo "==> 提示：晨羽桥接已独立为「云GPU中间件」，本脚本不再启动它"
 fi
 
 echo "==> 构建并启动前端"
