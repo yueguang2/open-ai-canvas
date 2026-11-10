@@ -5,6 +5,28 @@ description: 信封、错误码与 OpenAPI
 
 # HTTP API 合同
 
+## 网站、Key 分组与模型批量配置
+
+以下接口沿用登录 Cookie、Origin 检查及 `{ code, data, msg, reason }` 信封，服务层要求管理员权限。网站公共连接与各 Key 的凭据分开维护；网站响应不包含 Key。
+
+| 接口 | 入参与结果 |
+| --- | --- |
+| `GET /api/admin/channel-websites` | 返回 `data.websites[]`，包含 `id/name/baseUrl/apiFormat/proxyUrl/headers/keyCount/createdAt/updatedAt` |
+| `POST /api/admin/channel-websites`、`PATCH /api/admin/channel-websites/:id` | `{name,baseUrl,apiFormat,proxyUrl,headers,expectedUpdatedAt?}`；编辑携带读取时的 `updatedAt`，公共连接同步到网站下的 Key，返回 `data.website`。公共头仅接受 `Anthropic-Version`、`OpenAI-Beta` |
+| `DELETE /api/admin/channel-websites/:id` | 仅允许删除空网站，返回 `data.ok` |
+| `POST /api/admin/channels`、`PATCH /api/admin/channels/:id` | 原合同增加 `websiteId`；编辑可携带 `expectedUpdatedAt`。关联网站后公共连接从网站取得，Key 凭据和模型独立 |
+| `GET /api/admin/channels/:id/catalog-status` | 返回最近目录 `models/readAt?/stale`，不请求上游 |
+| `POST /api/admin/channels/:id/models/fetch` | 读取该 Key 的目录，返回 `models/added/retained/missing/firstRead/baselineReset/readAt/previousReadAt?`；缺失型号不会自动删除 |
+| `GET /api/admin/channels/:id/protocol-suggestion` | 查询参数 `providerModelKey/capability`；返回 `protocol?`、`source`（`selection/history/conflict/none/invalid`）、`candidates`、`reason?`、`selectedAt?`。建议不等于明确选择 |
+| `POST /api/admin/channels/:id/models/batch-update`、`POST /api/admin/channel-models/batch-update` | `{models:[{modelId,priceVersion,capabilityVersion,updatedAt,changes}]}`，分别限定单 Key 或允许跨 Key；返回 `data.updated` |
+| `POST /api/admin/channels/:id/models/batch-protocol`、`POST /api/admin/channel-models/batch-protocol` | 支持 `{groups:[{modelIds,protocol}]}`，按模型原类型分组设置协议 |
+
+`changes` 可包含 `capability`（仅初始化未设置类型的模型）、`protocol`、`displayName`、`description`、`enabled`、`pricingEnabled`、`capabilityTemplate`、`pricingTemplate`。省略字段保持原值，不接受以 `null` 隐式清空或设置为零。`capabilityTemplate` 只需 `{capabilityConfig}`，不能用模板内容隐式切换协议；`pricingTemplate` 为 `{priceCurrency,referenceVideoBilling,priceTiers}`，金额和开关按价格档合同明确提供。
+
+`pricingEnabled` 对所选模型全部价格档的「可供用户使用」生效，不修改金额、成本或免费状态。整个批次先组合并校验最终配置，检查模型时间戳及能力 / 价格版本，再在一个事务内写入；任一项失效或类型冲突则整批零写入，返回 HTTP 400、`reason=invalid_argument`。接口拒绝未知字段及多余 JSON 对象，批量请求体上限为 2 MiB。客户端收到成功后刷新失败时，应刷新列表而非重发修改。
+
+使用说明见[渠道、模板与批量配置](/docs/backend/channel-configuration)，迁移见[后端数据库](/docs/backend/backend-database)。
+
 ## 灵感上新
 
 后端每 6 小时从 GitHub 拉取 YouMind 提示词库（两个 `README_zh.md`）和 awesome-seedance（`data/cases.json`、`data/case-taxonomy.json`），经出站 SSRF 客户端下载，只收正文已是中文的条目。上次有来源失败时 1 小时后重试；多实例部署通过协调器锁只让一个实例同步。服务器访问 GitHub 需要正常 DNS，必要时配置 `HTTPS_PROXY`。数据表见 [后端数据库](/docs/backend/backend-database)。
@@ -471,6 +493,12 @@ Token 报价的 `estimated` 为 `true`，`quantity` 是预留 Token 数。`inten
 总览的请求类指标（`kpi.upstreamRequests`、`kpi.successRate`、`kpi.p95DurationMs`、`trend[].requests`、`models[].requests` 与耗时、`failures[]`、按调用计入的活跃用户）只统计 `request_kind = create` 的模型生成请求；图片、视频的轮询结果已合并进 create 根记录，轮询、下载、上传、本地保存等阶段不计入。成功率按 succeeded /（succeeded + failed）计算，`trend[].requestSuccessRate`、`models[].taskSuccessRate`、`models[].requestSuccessRate` 在没有样本时返回 `null`，不返回 0。`trend[].consumedMicrocredits` 为当天已结算订单的实收积分，与 `kpi.finance.revenueMicrocredits` 同一口径，按订单首条可计费调用的 UTC 日期归属；`kpi.totalConsumedMicrocredits` 已移除。
 
 `GET /admin/api-logs` 与 `GET /admin/api-logs-export.csv` 支持 `from`、`to`（`YYYY-MM-DD` 按 UTC 自然日、含结束日，或 RFC 3339 时间点）、`userId`、`model`、`channelId`、`capability`；不传日期时默认近 30 个 UTC 日，单次最多 366 天。
+
+视频模型的 `GET /admin/api-logs/:id` 详情增加 `generationContent`，包含 `prompt`、按本次请求顺序编号的 `references[]`、`source`（`snapshot` / `task` / `request`）、`incomplete` 与可选 `note`。每个引用返回 `{ id, kind, label, name, role?, available, unavailableReason?, mediaUrl? }`；编号分别为图片、视频、音频独立计数，对应提示词中的 `@图片N`、`@视频N`、`@音频N`。列表和 CSV 不返回该快照。快照绑定实际请求，成功任务压缩输入、当前画布修改或同 ID 重试都不会替换旧日志的素材身份。
+
+`GET /admin/api-logs/:id/references/:refId/media` 读取该日志中已验证归属的原始资源，支持 HTTP Range；仅管理员可用，继续核对日志、关联任务与资源所属用户。接口固定后端转发原件，不接受 URL、资源 ID 或交付变体等查询参数，不重定向到对象存储。返回 `Cache-Control: private, no-store`、`Referrer-Policy: no-referrer` 与 `X-Content-Type-Options: nosniff`。
+
+新快照仅保存脱敏提示词、名称、编号、角色和原始资源身份，不保存密钥、请求头、外部链接、签名 URL 或内嵌媒体。方舟 `asset://` 引用只有在原始资源与当前用户的素材绑定一致时才提供预览。旧日志只使用能够确认属于同次请求的任务输入或已保存报文；原始素材没有保存、已删除或无法证明来源时返回不可用说明，不根据当前画布猜测，不在查看详情时访问外部 URL。
 
 `GET /admin/billing-orders` 的每条订单额外返回 `userDisplayName`、`userAccount`，按当前页用户 ID 批量读取；字段不入库，普通用户的订单接口不返回。
 

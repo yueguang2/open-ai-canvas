@@ -44,6 +44,8 @@ type (
 	AgentMemoryRevisionRestore             = app.AgentMemoryRevisionRestore
 	AgentMemoryProposalView                = app.AgentMemoryProposalView
 	AgentMemoryRevisionView                = app.AgentMemoryRevisionView
+	APICallGenerationContent               = app.APICallGenerationContent
+	APICallGenerationReference             = app.APICallGenerationReference
 	APICallLogPage                         = app.APICallLogPage
 	APICallLogQuery                        = app.APICallLogQuery
 	AccountFileStorageUsage                = app.AccountFileStorageUsage
@@ -133,6 +135,12 @@ type (
 	ChannelModelCatalogOptions             = app.ChannelModelCatalogOptions
 	ChannelModelPriceTierRequest           = app.ChannelModelPriceTierRequest
 	ChannelModelRequest                    = app.ChannelModelRequest
+	ChannelModelProtocolGroup              = app.ChannelModelProtocolGroup
+	ChannelModelBatchProtocolRequest       = app.ChannelModelBatchProtocolRequest
+	BatchChannelModelUpdate                = app.BatchChannelModelUpdate
+	BatchChannelModelChanges               = app.BatchChannelModelChanges
+	BatchModelCapabilityTemplate           = app.BatchModelCapabilityTemplate
+	BatchModelPricingTemplate              = app.BatchModelPricingTemplate
 	ChannelModelRepriceRequest             = app.ChannelModelRepriceRequest
 	ChannelModelQuoteRequest               = app.ChannelModelQuoteRequest
 	ChannelModelSortRequest                = app.ChannelModelSortRequest
